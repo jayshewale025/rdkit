@@ -57,6 +57,10 @@ class RDKIT_MOLDRAW2D_EXPORT MolDraw2DSVG : public MolDraw2D {
                     unsigned int nSegments = 16, double vertOffset = 0.05,
                     bool rawCoords = false) override;
 
+  void drawCubicBezier(const Point2D &start, const Point2D &control1,
+                       const Point2D &control2, const Point2D &end,
+                       bool rawCoords = false) override;
+
   // this only makes sense if the object was initialized without a stream
   std::string getDrawingText() const { return d_ss.str(); }
 

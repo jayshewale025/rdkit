@@ -19,12 +19,15 @@
 
 #include <GraphMol/ROMol.h>
 #include <GraphMol/MolDraw2D/MolDraw2D.h>
+#include <GraphMol/MolDraw2D/MolDraw2DMechanism.h>
 #include <GraphMol/MolDraw2D/MolDraw2DHelpers.h>
 #include <GraphMol/MolDraw2D/MolDraw2DUtils.h>
 
 #include <GraphMol/MolDraw2D/MolDraw2DSVG.h>
 #include <Geometry/point.h>
 #include <boost/python/suite/indexing/map_indexing_suite.hpp>
+#include <cmath>
+#include <limits>
 #ifdef RDK_BUILD_CAIRO_SUPPORT
 #include <cairo.h>
 #include <GraphMol/MolDraw2D/MolDraw2DCairo.h>
@@ -403,6 +406,68 @@ void drawMoleculesHelper2(MolDraw2D &self, python::object pmols,
                      confIds.get());
 }
 
+namespace {
+python::tuple mechanismSequence(python::object obj, const char *name,
+                                bool optional = false) {
+  if (optional && obj.is_none()) {
+    return python::tuple();
+  }
+  if (!PySequence_Check(obj.ptr()) || PyUnicode_Check(obj.ptr()) ||
+      PyBytes_Check(obj.ptr())) {
+    throw ValueErrorException(std::string(name) + " must be a sequence");
+  }
+  return python::tuple(python::handle<>(PySequence_Tuple(obj.ptr())));
+}
+
+template <typename T>
+std::vector<T> mechanismVector(const python::tuple &items, const char *name) {
+  std::vector<T> result;
+  result.reserve(python::len(items));
+  for (Py_ssize_t i = 0; i < python::len(items); ++i) {
+    python::extract<T> value(items[i]);
+    if (!value.check()) {
+      throw ValueErrorException(std::string("Invalid element in ") + name);
+    }
+    result.push_back(value());
+  }
+  return result;
+}
+}  // namespace
+
+python::list drawMechanismHelper(MolDraw2D &self, python::object pmols,
+                                 python::object parrows,
+                                 python::object poffsets,
+                                 python::object protations,
+                                 python::object pconfIds) {
+  // Keep strong references even for sequences which construct items on access.
+  const auto molObjects = mechanismSequence(pmols, "mols");
+  for (Py_ssize_t i = 0; i < python::len(molObjects); ++i) {
+    python::object mol = molObjects[i];
+    if (mol.is_none()) {
+      throw ValueErrorException("mols must not contain None");
+    }
+  }
+  const auto mols = mechanismVector<ROMol *>(molObjects, "mols");
+  const auto arrows = mechanismVector<MechanismArrow>(
+      mechanismSequence(parrows, "arrows"), "arrows");
+  const auto offsets = mechanismVector<Point2D>(
+      mechanismSequence(poffsets, "offsets", true), "offsets");
+  const auto rotations = mechanismVector<double>(
+      mechanismSequence(protations, "rotations", true), "rotations");
+  const auto confIds = mechanismVector<int>(
+      mechanismSequence(pconfIds, "confIds", true), "confIds");
+  python::list result;
+  for (const auto &fragment :
+       self.drawMechanism(mols, arrows, offsets, rotations, confIds)) {
+    python::list positions;
+    for (const auto &point : fragment) {
+      positions.append(point);
+    }
+    result.append(positions);
+  }
+  return result;
+}
+
 void drawReactionHelper(MolDraw2D &self, const ChemicalReaction &rxn,
                         bool highlightByReactant,
                         python::object phighlightColorsReactants,
@@ -444,6 +509,51 @@ python::tuple colourToPyTuple(const DrawColour &clr) {
   res.append(clr.a);
 
   return python::tuple(res);
+}
+unsigned int checkedMechanismIndex(long long value) {
+  if (value < 0 || static_cast<unsigned long long>(value) >
+                       std::numeric_limits<unsigned int>::max()) {
+    throw ValueErrorException(
+        "Mechanism indices must be nonnegative unsigned integers");
+  }
+  return static_cast<unsigned int>(value);
+}
+void setMechanismFragment(MechanismAnchor &self, long long value) {
+  self.fragment = checkedMechanismIndex(value);
+}
+void setMechanismIndex(MechanismAnchor &self, long long value) {
+  self.index = checkedMechanismIndex(value);
+}
+MechanismAnchor mechanismAtomAnchor(long long fragment, long long atomIndex,
+                                    const Point2D &offset) {
+  return MechanismAnchor::atom(checkedMechanismIndex(fragment),
+                               checkedMechanismIndex(atomIndex), offset);
+}
+MechanismAnchor mechanismBondAnchor(long long fragment, long long bondIndex,
+                                    double fraction, const Point2D &offset) {
+  return MechanismAnchor::bond(checkedMechanismIndex(fragment),
+                               checkedMechanismIndex(bondIndex), fraction,
+                               offset);
+}
+MechanismAnchor mechanismLonePairAnchor(long long fragment, long long atomIndex,
+                                        const Point2D &offset, double angle) {
+  return MechanismAnchor::lonePair(checkedMechanismIndex(fragment),
+                                   checkedMechanismIndex(atomIndex), offset,
+                                   angle);
+}
+python::tuple getMechanismColour(const MechanismArrow &self) {
+  return colourToPyTuple(self.colour);
+}
+void setMechanismColour(MechanismArrow &self, python::tuple tpl) {
+  if (python::len(tpl) != 3 && python::len(tpl) != 4) {
+    throw ValueErrorException("colour must be an RGB or RGBA tuple");
+  }
+  auto colour = pyTupleToDrawColour(tpl);
+  if (!std::isfinite(colour.r) || !std::isfinite(colour.g) ||
+      !std::isfinite(colour.b) || !std::isfinite(colour.a)) {
+    throw ValueErrorException("colour values must be finite");
+  }
+  self.colour = colour;
 }
 python::object getBgColour(const RDKit::MolDrawOptions &self) {
   return colourToPyTuple(self.backgroundColour);
@@ -777,6 +887,71 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
       "Module containing a C++ implementation of 2D molecule drawing";
 
   rdkit_import_array();
+
+  python::import("rdkit.Geometry.rdGeometry");
+  python::enum_<RDKit::MechanismAnchorType>("MechanismAnchorType")
+      .value("Atom", RDKit::MechanismAnchorType::Atom)
+      .value("Bond", RDKit::MechanismAnchorType::Bond)
+      .value("LonePair", RDKit::MechanismAnchorType::LonePair)
+      .value("Point", RDKit::MechanismAnchorType::Point);
+  python::enum_<RDKit::ElectronArrowHead>("ElectronArrowHead")
+      .value("Full", RDKit::ElectronArrowHead::Full)
+      .value("FishhookLeft", RDKit::ElectronArrowHead::FishhookLeft)
+      .value("FishhookRight", RDKit::ElectronArrowHead::FishhookRight);
+  python::class_<RDKit::MechanismAnchor>(
+      "MechanismAnchor", "An explicitly positioned electron-flow endpoint.")
+      .def_readwrite("type", &RDKit::MechanismAnchor::type)
+      .add_property("fragment",
+                    python::make_getter(&RDKit::MechanismAnchor::fragment),
+                    &RDKit::setMechanismFragment)
+      .add_property("index",
+                    python::make_getter(&RDKit::MechanismAnchor::index),
+                    &RDKit::setMechanismIndex)
+      .def_readwrite("offset", &RDKit::MechanismAnchor::offset)
+      .def_readwrite("fraction", &RDKit::MechanismAnchor::fraction)
+      .def_readwrite("clipToLabel", &RDKit::MechanismAnchor::clipToLabel)
+      .def_readwrite("lonePairAngle", &RDKit::MechanismAnchor::lonePairAngle)
+      .def_readwrite("lonePairSeparation",
+                     &RDKit::MechanismAnchor::lonePairSeparation)
+      .def_readwrite("lonePairRadius", &RDKit::MechanismAnchor::lonePairRadius)
+      .def("Atom", &RDKit::mechanismAtomAnchor,
+           (python::arg("fragment"), python::arg("atomIndex"),
+            python::arg("offset") = Point2D()),
+           "Anchor to an original atom index; offset is in the fragment frame.")
+      .staticmethod("Atom")
+      .def("Bond", &RDKit::mechanismBondAnchor,
+           (python::arg("fragment"), python::arg("bondIndex"),
+            python::arg("fraction") = 0.5, python::arg("offset") = Point2D()),
+           "Anchor along an original bond, from begin (0) to end (1).")
+      .staticmethod("Bond")
+      .def(
+          "LonePair", &RDKit::mechanismLonePairAnchor,
+          (python::arg("fragment"), python::arg("atomIndex"),
+           python::arg("offset"), python::arg("angle") = 0.0),
+          "Draw explicit dots at an atom-relative offset; angle is local degrees.")
+      .staticmethod("LonePair")
+      .def("Point", &RDKit::MechanismAnchor::point, python::arg("position"),
+           "Anchor to an absolute scene point, independent of any fragment.")
+      .staticmethod("Point");
+  python::class_<RDKit::MechanismArrow>(
+      "MechanismArrow", "A user-specified cubic electron-flow arrow.",
+      python::init<const RDKit::MechanismAnchor &,
+                   const RDKit::MechanismAnchor &, const Point2D &,
+                   const Point2D &, python::optional<RDKit::ElectronArrowHead>>(
+          (python::arg("start"), python::arg("end"), python::arg("control1"),
+           python::arg("control2"),
+           python::arg("head") = RDKit::ElectronArrowHead::Full)))
+      .def_readwrite("start", &RDKit::MechanismArrow::start)
+      .def_readwrite("end", &RDKit::MechanismArrow::end)
+      .def_readwrite("control1", &RDKit::MechanismArrow::control1)
+      .def_readwrite("control2", &RDKit::MechanismArrow::control2)
+      .def_readwrite("head", &RDKit::MechanismArrow::head)
+      .def_readwrite("headLength", &RDKit::MechanismArrow::headLength)
+      .def_readwrite("headWidth", &RDKit::MechanismArrow::headWidth)
+      .def_readwrite("lineWidth", &RDKit::MechanismArrow::lineWidth)
+      .add_property(
+          "colour", &RDKit::getMechanismColour, &RDKit::setMechanismColour,
+          "Arrow colour as an RGBA tuple; accepts RGB or RGBA in [0, 1].");
 
   if (!is_python_converter_registered<std::map<int, std::string>>()) {
     python::class_<std::map<int, std::string>>("IntStringMap")
@@ -1182,6 +1357,18 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
             python::arg("confIds") = python::object(),
             python::arg("legends") = python::object()),
            "renders multiple molecules\n")
+      .def(
+          "DrawMechanism", &RDKit::drawMechanismHelper,
+          (python::arg("self"), python::arg("mols"), python::arg("arrows"),
+           python::arg("offsets") = python::object(),
+           python::arg("rotations") = python::object(),
+           python::arg("confIds") = python::object()),
+          "Draw copies of positioned fragments and user-specified electron arrows. "
+          "Inputs are sequences; optional placement sequences may be None. "
+          "Rotations are counterclockwise degrees, applied before offsets. "
+          "Anchor indices refer to original molecules; control points use scene "
+          "coordinates (Y up). Returns a list of lists of original-atom pixel "
+          "positions. No mechanism inference or automatic routing is performed.")
       .def("DrawReaction", RDKit::drawReactionHelper,
            (python::arg("self"), python::arg("rxn"),
             python::arg("highlightByReactant") = false,
@@ -1227,6 +1414,13 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
            "draws a line with the current drawing style. The coordinates "
            "are in the molecule frame unless rawCoords is true, "
            "in which case the coordinates are in pixels.")
+      .def("DrawCubicBezier", &RDKit::MolDraw2D::drawCubicBezier,
+           (python::arg("self"), python::arg("start"), python::arg("control1"),
+            python::arg("control2"), python::arg("end"),
+            python::arg("rawCoords") = false),
+           "Stroke a cubic Bezier with the current colour, line width and dash "
+           "pattern, never filling it. Coordinates are in the molecule frame "
+           "unless rawCoords is True, in which case they are pixels.")
       .def(
           "DrawArrow", RDKit::drawArrowHelper,
           (python::arg("self"), python::arg("cds1"), python::arg("cds2"),

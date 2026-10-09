@@ -637,6 +637,203 @@ It is also possible to use CoordGen with the MolDraw2D class. Here is one way to
 
 .. image:: images/RDKitCB_37_im2.svg
 
+Drawing User-Specified Electron-Flow Arrows
+==========================================
+
+``MolDraw2D.DrawMechanism()`` draws positioned molecular fragments and a batch
+of explicitly supplied cubic electron-flow arrows. It does **not** infer a
+mechanism, generate products, change bonds, or automatically route arrows around
+other drawing elements. Choosing chemically appropriate endpoints and checking
+the final figure remain the caller's responsibility.
+
+The following nucleophilic addition example supplies an explicit conformer for
+each fragment, so its arrow coordinates do not depend on a layout algorithm.
+In ``CC=O``, atom 1 is the carbonyl carbon, atom 2 is oxygen, and bond 1 is
+the carbonyl bond. The hydroxide is fragment 1.
+
+.. testcode:: mechanism-drawing
+
+   from rdkit import Chem
+   from rdkit.Geometry import Point2D, Point3D
+   from rdkit.Chem.Draw import rdMolDraw2D
+
+   def positioned_molecule(smiles, positions):
+       mol = Chem.MolFromSmiles(smiles)
+       assert mol.GetNumAtoms() == len(positions)
+       conf = Chem.Conformer(mol.GetNumAtoms())
+       conf.Set3D(False)
+       for atom_index, (x, y) in enumerate(positions):
+           conf.SetAtomPosition(atom_index, Point3D(x, y, 0))
+       mol.AddConformer(conf, assignId=True)
+       return mol
+
+   aldehyde = positioned_molecule("CC=O", [(-1.3, -0.75), (0, 0), (0, 1.5)])
+   hydroxide = positioned_molecule("[OH-]", [(0, 0)])
+   Anchor = rdMolDraw2D.MechanismAnchor
+   Arrow = rdMolDraw2D.MechanismArrow
+
+   # Local hydroxide position (0, 0) will be translated to scene (-3, 0.6).
+   # LonePair explicitly draws two dots, not an inferred electron population.
+   donor = Anchor.LonePair(1, 0, Point2D(0.28, 0), angle=90)
+   donor.lonePairSeparation = 0.1
+   donor.lonePairRadius = 0.015
+   attack = Arrow(donor, Anchor.Atom(0, 1, offset=Point2D(-0.08, 0.04)),
+                  Point2D(-1.9, 0.2), Point2D(-0.9, 0.45))
+
+   # Start on the right-hand side of the C=O bond and end at the oxygen label.
+   pi_shift = Arrow(Anchor.Bond(0, 1, fraction=0.55, offset=Point2D(0.12, 0)),
+                    Anchor.Atom(0, 2),
+                    Point2D(0.7, 0.75), Point2D(0.85, 1.85))
+   for arrow in (attack, pi_shift):
+       arrow.colour = (0.1, 0.2, 0.6, 1.0)
+       arrow.lineWidth = 0.02
+       arrow.headLength = 0.14
+       arrow.headWidth = 0.055
+
+   drawer = rdMolDraw2D.MolDraw2DSVG(600, 300)
+   drawer.drawOptions().fixedFontSize = 18
+   atom_pixels = drawer.DrawMechanism(
+       [aldehyde, hydroxide], [attack, pi_shift],
+       offsets=[Point2D(0, 0), Point2D(-3, 0.6)])
+   drawer.FinishDrawing()
+   mechanism_svg = drawer.GetDrawingText()
+   assert [len(fragment) for fragment in atom_pixels] == [3, 1]
+   assert aldehyde.GetBondWithIdx(1).GetBondType() == Chem.BondType.DOUBLE
+   assert "mechanism-shaft" in mechanism_svg
+   # In a notebook: display(IPython.display.SVG(mechanism_svg))
+
+Coordinate and style conventions
+-------------------------------
+
+* Fragment IDs are indices into ``mols``. Atom and bond IDs are the **original**
+  molecule indices, even if depiction preparation adds atoms to a drawing copy.
+  Input molecules, conformers, and atom-map properties are not modified.
+* Each fragment is rotated counterclockwise about its coordinate origin, in
+  degrees, then translated by its ``offsets`` entry. Atom, bond, and lone-pair
+  anchor offsets are in that fragment's **unrotated local frame**.
+  A bond's ``fraction`` runs from its begin atom (0) to its end atom (1).
+* Both cubic control points are **absolute scene coordinates**, with positive
+  Y upward. They are not rotated or translated with a fragment. A
+  ``MechanismAnchor.Point(Point2D(x, y))`` likewise specifies an absolute scene
+  endpoint, independent of any molecule.
+* Atom anchors default to ``clipToLabel=True``. For a zero-offset atom anchor,
+  this trims the endpoint toward its adjacent control point to avoid the visible
+  atom label. Set ``clipToLabel=False`` to use the exact atom position.
+  A **nonzero atom offset is always preserved as manual placement**, even when
+  ``clipToLabel`` is true. Point anchors provide another fully manual option.
+  With clipping enabled, a control point inside the endpoint label raises
+  ``ValueError`` instead of routing the curve back through the label; move that
+  control point outward or explicitly disable clipping.
+* ``LonePair`` draws explicit dots at the supplied offset; ``lonePairAngle`` is
+  the dot-axis angle in local counterclockwise degrees.
+  ``lonePairSeparation`` and ``lonePairRadius`` control the dots in scene units.
+  Identical dot placements, sizes, and colours are drawn only once.
+* ``lineWidth``, ``headLength``, and ``headWidth`` use scene units;
+  ``headWidth`` is the half-width of a full head. These dimensions scale together
+  with the scene, unlike pixel-valued font options such as ``fixedFontSize``,
+  ``minFontSize``, and ``maxFontSize``. A fixed-size canvas fits the whole scene;
+  ``MolDraw2DSVG(-1, -1)`` requests automatic canvas sizing using the drawing
+  options, including ``scalingFactor``. Inspect the rendered result when
+  choosing font sizes, offsets, and control points.
+* ``colour`` returns an RGBA tuple and accepts RGB or RGBA values in [0, 1].
+  ``offsets``, ``rotations``, and ``confIds`` can be omitted, ``None``, or empty,
+  meaning zero translation, zero rotation, and the default conformer. Otherwise
+  each sequence must have one entry per fragment. Molecules without conformers
+  receive coordinates on their drawing copies, but explicit coordinates are
+  preferable when prescribing arrow geometry.
+
+The result is a list of lists of ``Point2D`` objects: final **pixel** coordinates
+of the original atoms grouped by input fragment, with Y downward. This is useful
+for subsequent annotations using the drawing primitives' ``rawCoords=True``.
+Invalid indices, bond fractions outside [0, 1], nonfinite geometry, empty or
+``None`` molecules, inconsistent placement lengths, and zero endpoint tangents
+raise ``ValueError``. Each control point must differ from its corresponding
+resolved endpoint.
+
+SVG shafts have classes ``mechanism-arrow-N mechanism-shaft``; their heads have
+``mechanism-arrow-N mechanism-head``, where N is the input arrow index.
+Lone-pair dots have class ``mechanism-lone-pair``. These classes support selecting
+the mechanism annotations without confusing them with molecular bond paths.
+Cairo builds provide the same ``DrawMechanism`` API on ``MolDraw2DCairo``.
+
+Single-electron arrows
+----------------------
+
+``ElectronArrowHead.Full`` is the default two-electron head.
+``FishhookLeft`` and ``FishhookRight`` draw one open wing. Left and right are
+defined while looking along the final curve tangent in the scene's Y-up frame,
+not in screen coordinates. Here are two manually routed fishhooks illustrating
+Cl--Cl bond homolysis; the input molecule still retains its bond:
+
+.. testcode:: mechanism-drawing
+
+   chlorine = positioned_molecule("ClCl", [(0, 0), (1.5, 0)])
+   Head = rdMolDraw2D.ElectronArrowHead
+   fishhooks = [
+       Arrow(Anchor.Bond(0, 0, offset=Point2D(0, 0.12)), Anchor.Atom(0, 0),
+             Point2D(0.7, 0.75), Point2D(-0.35, 0.7), Head.FishhookLeft),
+       Arrow(Anchor.Bond(0, 0, offset=Point2D(0, -0.12)), Anchor.Atom(0, 1),
+             Point2D(0.8, -0.75), Point2D(1.85, -0.7), Head.FishhookRight),
+   ]
+   radical_drawer = rdMolDraw2D.MolDraw2DSVG(350, 240)
+   chlorine_pixels = radical_drawer.DrawMechanism([chlorine], fishhooks)
+   radical_drawer.FinishDrawing()
+   fishhook_svg = radical_drawer.GetDrawingText()
+   assert chlorine.GetNumBonds() == 1
+
+Runnable mechanism gallery
+--------------------------
+
+The source-tree example ``Docs/Book/data/mechanism_gallery.py`` builds an
+offline gallery of explicitly authored mechanisms:
+
+* SN2 substitution, with simultaneous attack and leaving-group arrows.
+* Anti-periplanar E2 elimination, with three concerted arrows and an explicit
+  beta hydrogen.
+* Proton transfer, with an explicit hydrogen and a separately anchored bond
+  cleavage arrow.
+* Aromatic resonance, with three pi-electron shifts. This is electron
+  bookkeeping between resonance contributors, not a reaction.
+* Carbonyl addition, protonation, and a separately supplied product, shown as
+  consecutive panels. Every intermediate and product is authored explicitly;
+  ``DrawMechanism`` does not generate them.
+* Chlorine homolysis, with two single-electron fishhooks.
+
+From the repository root, using a Python environment containing **this fork**
+with ``DrawMechanism`` available:
+
+.. code-block:: console
+
+   python Docs/Book/data/mechanism_gallery.py --output mechanism-gallery
+   python Docs/Book/data/mechanism_gallery.py --output mechanism-gallery --png
+
+The first command requires only the SVG backend. The optional ``--png`` flag
+also produces native Cairo PNGs and fails explicitly when Cairo is unavailable.
+Open ``mechanism-gallery/index.html`` in a browser. It uses local SVG images,
+requires no network access, and includes captions and download links.
+``manifest.json`` records scene identifiers, dimensions, arrow counts, fragment
+counts, and original-atom counts. Re-running the command replaces the named
+output files; unrelated files in the output directory are left untouched.
+
+List the available identifiers or render only selected scenes:
+
+.. code-block:: console
+
+   python Docs/Book/data/mechanism_gallery.py --list
+   python Docs/Book/data/mechanism_gallery.py --only e2 --only aromatic-resonance
+
+The scene definitions are in ``mechanism_concerted.py`` and
+``mechanism_carbonyl.py`` alongside the runner; ``mechanism_common.py`` contains
+the coordinate and styling helpers. Explicit ``[H]`` atoms are preserved by
+setting ``SmilesParserParams.removeHs=False``. Fragment-relative anchors and
+global cubic control points remain editable, so the examples can be adapted
+without post-processing their SVG paths.
+
+These layouts use fixed conformers and were designed for the gallery's canvas
+and font sizes. Review label, bond, lone-pair, and arrow clearance after changing
+the structures, coordinates, or font settings; automatic collision detection
+and obstacle routing are not provided.
+
 On a Plot
 ======================
 

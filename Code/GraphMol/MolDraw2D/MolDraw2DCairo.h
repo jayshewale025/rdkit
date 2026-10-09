@@ -76,6 +76,10 @@ class RDKIT_MOLDRAW2D_EXPORT MolDraw2DCairo : public MolDraw2D {
                     unsigned int nSegments = 16, double vertOffset = 0.05,
                     bool rawCoords = false) override;
 
+  void drawCubicBezier(const Point2D &start, const Point2D &control1,
+                       const Point2D &control2, const Point2D &end,
+                       bool rawCoords = false) override;
+
   // returns the PNG data in a string
   std::string getDrawingText() const;
   // writes the PNG data to a file

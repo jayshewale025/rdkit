@@ -6,3 +6,5 @@ rdkit_python_extension(rdMolDraw2D
                        LINK_LIBRARIES MolDraw2D )
 
 add_pytest(pyMolDraw2D ${CMAKE_CURRENT_SOURCE_DIR}/testMolDraw2D.py)
+add_pytest(pyMechanismDrawing ${CMAKE_CURRENT_SOURCE_DIR}/testMechanismDrawing.py)
+add_pytest(pyMechanismGallery ${CMAKE_CURRENT_SOURCE_DIR}/testMechanismGallery.py)

@@ -23,10 +23,13 @@
 
 #include <GraphMol/ROMol.h>
 #include <GraphMol/MolDraw2D/MolDraw2D.h>
+#include <GraphMol/MolDraw2D/MolDraw2DMechanism.h>
 #include <GraphMol/MolDraw2D/MolDraw2DHelpers.h>
 #include <GraphMol/MolDraw2D/MolDraw2DUtils.h>
 #include <GraphMol/MolDraw2D/MolDraw2DSVG.h>
 #include <Geometry/point.h>
+#include <cmath>
+#include <limits>
 #ifdef RDK_BUILD_CAIRO_SUPPORT
 #include <cairo.h>
 #include <GraphMol/MolDraw2D/MolDraw2DCairo.h>
@@ -382,6 +385,67 @@ void drawMoleculesHelper2(MolDraw2D &self, nb::object pmols,
                      confIds.get());
 }
 
+nb::tuple mechanismSequence(nb::object obj, const char *name,
+                            bool optional = false) {
+  if (optional && obj.is_none()) {
+    return nb::tuple();
+  }
+  if (!PySequence_Check(obj.ptr()) || PyUnicode_Check(obj.ptr()) ||
+      PyBytes_Check(obj.ptr())) {
+    throw ValueErrorException(std::string(name) + " must be a sequence");
+  }
+  auto *sequence = PySequence_Tuple(obj.ptr());
+  if (!sequence) {
+    throw nb::python_error();
+  }
+  return nb::steal<nb::tuple>(sequence);
+}
+
+template <typename T>
+std::vector<T> mechanismVector(const nb::tuple &items, const char *name) {
+  std::vector<T> result;
+  result.reserve(nb::len(items));
+  for (auto item : items) {
+    try {
+      result.push_back(nb::cast<T>(item));
+    } catch (const nb::cast_error &) {
+      throw ValueErrorException(std::string("Invalid element in ") + name);
+    }
+  }
+  return result;
+}
+
+nb::list drawMechanismHelper(MolDraw2D &self, nb::object pmols,
+                             nb::object parrows, nb::object poffsets,
+                             nb::object protations, nb::object pconfIds) {
+  // Keep strong references even for sequences which construct items on access.
+  const auto molObjects = mechanismSequence(pmols, "mols");
+  for (auto mol : molObjects) {
+    if (mol.is_none()) {
+      throw ValueErrorException("mols must not contain None");
+    }
+  }
+  const auto mols = mechanismVector<ROMol *>(molObjects, "mols");
+  const auto arrows = mechanismVector<MechanismArrow>(
+      mechanismSequence(parrows, "arrows"), "arrows");
+  const auto offsets = mechanismVector<Point2D>(
+      mechanismSequence(poffsets, "offsets", true), "offsets");
+  const auto rotations = mechanismVector<double>(
+      mechanismSequence(protations, "rotations", true), "rotations");
+  const auto confIds = mechanismVector<int>(
+      mechanismSequence(pconfIds, "confIds", true), "confIds");
+  nb::list result;
+  for (const auto &fragment :
+       self.drawMechanism(mols, arrows, offsets, rotations, confIds)) {
+    nb::list positions;
+    for (const auto &point : fragment) {
+      positions.append(nb::cast(point, nb::rv_policy::copy));
+    }
+    result.append(positions);
+  }
+  return result;
+}
+
 void drawReactionHelper(MolDraw2D &self, const ChemicalReaction &rxn,
                         bool highlightByReactant,
                         nb::object phighlightColorsReactants,
@@ -419,6 +483,52 @@ ROMol *prepMolForDrawing(nb::object mol, bool kekulize, bool addChiralHs,
 
 nb::tuple colourToPyTuple(const DrawColour &clr) {
   return nb::make_tuple(clr.r, clr.g, clr.b, clr.a);
+}
+
+unsigned int checkedMechanismIndex(long long value) {
+  if (value < 0 || static_cast<unsigned long long>(value) >
+                       std::numeric_limits<unsigned int>::max()) {
+    throw ValueErrorException(
+        "Mechanism indices must be nonnegative unsigned integers");
+  }
+  return static_cast<unsigned int>(value);
+}
+void setMechanismFragment(MechanismAnchor &self, long long value) {
+  self.fragment = checkedMechanismIndex(value);
+}
+void setMechanismIndex(MechanismAnchor &self, long long value) {
+  self.index = checkedMechanismIndex(value);
+}
+MechanismAnchor mechanismAtomAnchor(long long fragment, long long atomIndex,
+                                    const Point2D &offset) {
+  return MechanismAnchor::atom(checkedMechanismIndex(fragment),
+                               checkedMechanismIndex(atomIndex), offset);
+}
+MechanismAnchor mechanismBondAnchor(long long fragment, long long bondIndex,
+                                    double fraction, const Point2D &offset) {
+  return MechanismAnchor::bond(checkedMechanismIndex(fragment),
+                               checkedMechanismIndex(bondIndex), fraction,
+                               offset);
+}
+MechanismAnchor mechanismLonePairAnchor(long long fragment, long long atomIndex,
+                                        const Point2D &offset, double angle) {
+  return MechanismAnchor::lonePair(checkedMechanismIndex(fragment),
+                                   checkedMechanismIndex(atomIndex), offset,
+                                   angle);
+}
+nb::tuple getMechanismColour(const MechanismArrow &self) {
+  return colourToPyTuple(self.colour);
+}
+void setMechanismColour(MechanismArrow &self, nb::tuple tpl) {
+  if (nb::len(tpl) != 3 && nb::len(tpl) != 4) {
+    throw ValueErrorException("colour must be an RGB or RGBA tuple");
+  }
+  auto colour = pyTupleToDrawColour(tpl);
+  if (!std::isfinite(colour.r) || !std::isfinite(colour.g) ||
+      !std::isfinite(colour.b) || !std::isfinite(colour.a)) {
+    throw ValueErrorException("colour values must be finite");
+  }
+  self.colour = colour;
 }
 
 nb::tuple getBgColour(const RDKit::MolDrawOptions &self) {
@@ -738,6 +848,65 @@ NB_MODULE(rdMolDraw2D, m) {
   m.doc() = "Module containing a C++ implementation of 2D molecule drawing";
 
   rdkit_import_array();
+
+  nb::module_::import_("rdkit.Geometry.rdGeometry");
+  nb::enum_<RDKit::MechanismAnchorType>(m, "MechanismAnchorType")
+      .value("Atom", RDKit::MechanismAnchorType::Atom)
+      .value("Bond", RDKit::MechanismAnchorType::Bond)
+      .value("LonePair", RDKit::MechanismAnchorType::LonePair)
+      .value("Point", RDKit::MechanismAnchorType::Point);
+  nb::enum_<RDKit::ElectronArrowHead>(m, "ElectronArrowHead")
+      .value("Full", RDKit::ElectronArrowHead::Full)
+      .value("FishhookLeft", RDKit::ElectronArrowHead::FishhookLeft)
+      .value("FishhookRight", RDKit::ElectronArrowHead::FishhookRight);
+  nb::class_<RDKit::MechanismAnchor>(
+      m, "MechanismAnchor", "An explicitly positioned electron-flow endpoint.")
+      .def(nb::init<>())
+      .def_rw("type", &RDKit::MechanismAnchor::type)
+      .def_prop_rw(
+          "fragment", [](const MechanismAnchor &self) { return self.fragment; },
+          &setMechanismFragment)
+      .def_prop_rw(
+          "index", [](const MechanismAnchor &self) { return self.index; },
+          &setMechanismIndex)
+      .def_rw("offset", &RDKit::MechanismAnchor::offset)
+      .def_rw("fraction", &RDKit::MechanismAnchor::fraction)
+      .def_rw("clipToLabel", &RDKit::MechanismAnchor::clipToLabel)
+      .def_rw("lonePairAngle", &RDKit::MechanismAnchor::lonePairAngle)
+      .def_rw("lonePairSeparation", &RDKit::MechanismAnchor::lonePairSeparation)
+      .def_rw("lonePairRadius", &RDKit::MechanismAnchor::lonePairRadius)
+      .def_static(
+          "Atom", &mechanismAtomAnchor, "fragment"_a, "atomIndex"_a,
+          "offset"_a = Point2D(),
+          "Anchor to an original atom index; offset is in the fragment frame.")
+      .def_static("Bond", &mechanismBondAnchor, "fragment"_a, "bondIndex"_a,
+                  "fraction"_a = 0.5, "offset"_a = Point2D(),
+                  "Anchor along an original bond, from begin (0) to end (1).")
+      .def_static(
+          "LonePair", &mechanismLonePairAnchor, "fragment"_a, "atomIndex"_a,
+          "offset"_a, "angle"_a = 0.0,
+          "Draw explicit dots at an atom-relative offset; angle is local degrees.")
+      .def_static(
+          "Point", &RDKit::MechanismAnchor::point, "position"_a,
+          "Anchor to an absolute scene point, independent of any fragment.");
+  nb::class_<RDKit::MechanismArrow>(
+      m, "MechanismArrow", "A user-specified cubic electron-flow arrow.")
+      .def(nb::init<const RDKit::MechanismAnchor &,
+                    const RDKit::MechanismAnchor &, const Point2D &,
+                    const Point2D &, RDKit::ElectronArrowHead>(),
+           "start"_a, "end"_a, "control1"_a, "control2"_a,
+           "head"_a = RDKit::ElectronArrowHead::Full)
+      .def_rw("start", &RDKit::MechanismArrow::start)
+      .def_rw("end", &RDKit::MechanismArrow::end)
+      .def_rw("control1", &RDKit::MechanismArrow::control1)
+      .def_rw("control2", &RDKit::MechanismArrow::control2)
+      .def_rw("head", &RDKit::MechanismArrow::head)
+      .def_rw("headLength", &RDKit::MechanismArrow::headLength)
+      .def_rw("headWidth", &RDKit::MechanismArrow::headWidth)
+      .def_rw("lineWidth", &RDKit::MechanismArrow::lineWidth)
+      .def_prop_rw(
+          "colour", &getMechanismColour, &setMechanismColour,
+          "Arrow colour as an RGBA tuple; accepts RGB or RGBA in [0, 1].");
 
   nb::enum_<RDKit::MultiColourHighlightStyle>(m, "MultiColourHighlightStyle")
       .value("CircleAndLine", RDKit::MultiColourHighlightStyle::CIRCLEANDLINE)
@@ -1118,6 +1287,16 @@ DrawElement items.  Default=DrawElement.ALL)DOC")
            "highlightBondColors"_a = nb::none(),
            "highlightAtomRadii"_a = nb::none(), "confIds"_a = nb::none(),
            "legends"_a = nb::none(), "renders multiple molecules\n")
+      .def(
+          "DrawMechanism", &drawMechanismHelper, "mols"_a.none(), "arrows"_a.none(),
+          "offsets"_a = nb::none(), "rotations"_a = nb::none(),
+          "confIds"_a = nb::none(),
+          "Draw copies of positioned fragments and user-specified electron arrows. "
+          "Inputs are sequences; optional placement sequences may be None. "
+          "Rotations are counterclockwise degrees, applied before offsets. "
+          "Anchor indices refer to original molecules; control points use scene "
+          "coordinates (Y up). Returns a list of lists of original-atom pixel "
+          "positions. No mechanism inference or automatic routing is performed.")
       .def("DrawReaction", &drawReactionHelper, "rxn"_a,
            "highlightByReactant"_a = false,
            "highlightColorsReactants"_a = nb::none(), "confIds"_a = nb::none(),
@@ -1155,6 +1334,11 @@ DrawElement items.  Default=DrawElement.ALL)DOC")
            "draws a line with the current drawing style. The coordinates "
            "are in the molecule frame unless rawCoords is true, "
            "in which case the coordinates are in pixels.")
+      .def("DrawCubicBezier", &RDKit::MolDraw2D::drawCubicBezier, "start"_a,
+           "control1"_a, "control2"_a, "end"_a, "rawCoords"_a = false,
+           "Stroke a cubic Bezier with the current colour, line width and dash "
+           "pattern, never filling it. Coordinates are in the molecule frame "
+           "unless rawCoords is True, in which case they are pixels.")
       .def("DrawArrow", &drawArrowHelper, "cds1"_a, "cds2"_a,
            "asPolygon"_a = false, "frac"_a = 0.05, "angle"_a = M_PI / 6,
            "color"_a = nb::none(), "rawCoords"_a = false,
