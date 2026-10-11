@@ -438,7 +438,7 @@ python::list drawMechanismHelper(MolDraw2D &self, python::object pmols,
                                  python::object parrows,
                                  python::object poffsets,
                                  python::object protations,
-                                 python::object pconfIds) {
+                                 python::object pconfIds, bool autoLayout) {
   // Keep strong references even for sequences which construct items on access.
   const auto molObjects = mechanismSequence(pmols, "mols");
   for (Py_ssize_t i = 0; i < python::len(molObjects); ++i) {
@@ -458,7 +458,7 @@ python::list drawMechanismHelper(MolDraw2D &self, python::object pmols,
       mechanismSequence(pconfIds, "confIds", true), "confIds");
   python::list result;
   for (const auto &fragment :
-       self.drawMechanism(mols, arrows, offsets, rotations, confIds)) {
+       self.drawMechanism(mols, arrows, offsets, rotations, confIds, autoLayout)) {
     python::list positions;
     for (const auto &point : fragment) {
       positions.append(point);
@@ -536,9 +536,18 @@ MechanismAnchor mechanismBondAnchor(long long fragment, long long bondIndex,
                                offset);
 }
 MechanismAnchor mechanismLonePairAnchor(long long fragment, long long atomIndex,
-                                        const Point2D &offset, double angle) {
-  return MechanismAnchor::lonePair(checkedMechanismIndex(fragment),
-                                   checkedMechanismIndex(atomIndex), offset,
+                                        python::object offset, double angle) {
+  const auto checkedFragment = checkedMechanismIndex(fragment);
+  const auto checkedAtomIndex = checkedMechanismIndex(atomIndex);
+  if (offset.is_none()) {
+    return MechanismAnchor::lonePair(checkedFragment, checkedAtomIndex);
+  }
+  python::extract<const Point2D &> point(offset);
+  if (!point.check()) {
+    PyErr_SetString(PyExc_TypeError, "offset must be a Point2D or None");
+    python::throw_error_already_set();
+  }
+  return MechanismAnchor::lonePair(checkedFragment, checkedAtomIndex, point(),
                                    angle);
 }
 python::tuple getMechanismColour(const MechanismArrow &self) {
@@ -554,6 +563,7 @@ void setMechanismColour(MechanismArrow &self, python::tuple tpl) {
     throw ValueErrorException("colour values must be finite");
   }
   self.colour = colour;
+  self.autoColour = false;
 }
 python::object getBgColour(const RDKit::MolDrawOptions &self) {
   return colourToPyTuple(self.backgroundColour);
@@ -899,7 +909,7 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
       .value("FishhookLeft", RDKit::ElectronArrowHead::FishhookLeft)
       .value("FishhookRight", RDKit::ElectronArrowHead::FishhookRight);
   python::class_<RDKit::MechanismAnchor>(
-      "MechanismAnchor", "An explicitly positioned electron-flow endpoint.")
+      "MechanismAnchor", "A user-specified electron-flow endpoint.")
       .def_readwrite("type", &RDKit::MechanismAnchor::type)
       .add_property("fragment",
                     python::make_getter(&RDKit::MechanismAnchor::fragment),
@@ -910,6 +920,10 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
       .def_readwrite("offset", &RDKit::MechanismAnchor::offset)
       .def_readwrite("fraction", &RDKit::MechanismAnchor::fraction)
       .def_readwrite("clipToLabel", &RDKit::MechanismAnchor::clipToLabel)
+      .def_readwrite(
+          "autoPosition", &RDKit::MechanismAnchor::autoPosition,
+          "Automatically position and orient lone-pair dots, ignoring offset "
+          "and lonePairAngle. False except for LonePair without an offset.")
       .def_readwrite("lonePairAngle", &RDKit::MechanismAnchor::lonePairAngle)
       .def_readwrite("lonePairSeparation",
                      &RDKit::MechanismAnchor::lonePairSeparation)
@@ -927,31 +941,54 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
       .def(
           "LonePair", &RDKit::mechanismLonePairAnchor,
           (python::arg("fragment"), python::arg("atomIndex"),
-           python::arg("offset"), python::arg("angle") = 0.0),
-          "Draw explicit dots at an atom-relative offset; angle is local degrees.")
+           python::arg("offset") = python::object(), python::arg("angle") = 0.0),
+          "Anchor to an original atom and draw lone-pair dots. With offset=None "
+          "(the default), autoPosition is True and position and angle are chosen "
+          "automatically. An explicit Point2D offset uses manual positioning "
+          "(autoPosition=False); angle is in fragment-local degrees.")
       .staticmethod("LonePair")
       .def("Point", &RDKit::MechanismAnchor::point, python::arg("position"),
            "Anchor to an absolute scene point, independent of any fragment.")
       .staticmethod("Point");
   python::class_<RDKit::MechanismArrow>(
-      "MechanismArrow", "A user-specified cubic electron-flow arrow.",
+      "MechanismArrow",
+      "A user-specified electron-flow arrow with automatic or manual curves.",
       python::init<const RDKit::MechanismAnchor &,
-                   const RDKit::MechanismAnchor &, const Point2D &,
-                   const Point2D &, python::optional<RDKit::ElectronArrowHead>>(
+                   const RDKit::MechanismAnchor &,
+                   python::optional<RDKit::ElectronArrowHead>>(
+          (python::arg("start"), python::arg("end"),
+           python::arg("head") = RDKit::ElectronArrowHead::Full),
+          "Create an endpoint-only arrow with autoRoute=True and autoColour=True."))
+      .def(python::init<
+           const RDKit::MechanismAnchor &, const RDKit::MechanismAnchor &,
+           const Point2D &, const Point2D &,
+           python::optional<RDKit::ElectronArrowHead>>(
           (python::arg("start"), python::arg("end"), python::arg("control1"),
            python::arg("control2"),
-           python::arg("head") = RDKit::ElectronArrowHead::Full)))
+           python::arg("head") = RDKit::ElectronArrowHead::Full),
+          "Create a manual cubic arrow with autoRoute=False and autoColour=False."))
       .def_readwrite("start", &RDKit::MechanismArrow::start)
       .def_readwrite("end", &RDKit::MechanismArrow::end)
-      .def_readwrite("control1", &RDKit::MechanismArrow::control1)
-      .def_readwrite("control2", &RDKit::MechanismArrow::control2)
+      .def_readwrite("control1", &RDKit::MechanismArrow::control1,
+                     "First scene-space control point; ignored when autoRoute "
+                     "is True. Assignment does not disable autoRoute.")
+      .def_readwrite("control2", &RDKit::MechanismArrow::control2,
+                     "Second scene-space control point; ignored when autoRoute "
+                     "is True. Assignment does not disable autoRoute.")
       .def_readwrite("head", &RDKit::MechanismArrow::head)
       .def_readwrite("headLength", &RDKit::MechanismArrow::headLength)
       .def_readwrite("headWidth", &RDKit::MechanismArrow::headWidth)
       .def_readwrite("lineWidth", &RDKit::MechanismArrow::lineWidth)
+      .def_readwrite("autoRoute", &RDKit::MechanismArrow::autoRoute,
+                     "Choose control points automatically. True for endpoint-only "
+                     "arrows, False for manual arrows.")
+      .def_readwrite("autoColour", &RDKit::MechanismArrow::autoColour,
+                     "Use the deterministic scene palette instead of colour. "
+                     "True for endpoint-only arrows, False for manual arrows.")
       .add_property(
           "colour", &RDKit::getMechanismColour, &RDKit::setMechanismColour,
-          "Arrow colour as an RGBA tuple; accepts RGB or RGBA in [0, 1].");
+          "Arrow colour as an RGBA tuple; accepts RGB or RGBA in [0, 1]. "
+          "Successful assignment sets autoColour=False.");
 
   if (!is_python_converter_registered<std::map<int, std::string>>()) {
     python::class_<std::map<int, std::string>>("IntStringMap")
@@ -1362,13 +1399,22 @@ BOOST_PYTHON_MODULE(rdMolDraw2D) {
           (python::arg("self"), python::arg("mols"), python::arg("arrows"),
            python::arg("offsets") = python::object(),
            python::arg("rotations") = python::object(),
-           python::arg("confIds") = python::object()),
-          "Draw copies of positioned fragments and user-specified electron arrows. "
+           python::arg("confIds") = python::object(),
+           python::arg("autoLayout") = true),
+          "Draw copies of fragments and user-specified electron arrows. "
           "Inputs are sequences; optional placement sequences may be None. "
           "Rotations are counterclockwise degrees, applied before offsets. "
-          "Anchor indices refer to original molecules; control points use scene "
-          "coordinates (Y up). Returns a list of lists of original-atom pixel "
-          "positions. No mechanism inference or automatic routing is performed.")
+          "Anchor indices refer to original molecules; manual control points use "
+          "scene coordinates (Y up). Endpoint-only arrows choose their curves "
+          "and colours. With autoLayout=True (the default), fragments are also "
+          "arranged when arrows is nonempty, every arrow has autoRoute=True, "
+          "offsets and rotations are absent or empty, and there are no Point "
+          "anchors. Otherwise existing coordinates and explicit placements are "
+          "preserved. autoLayout=False pins fragment placement, not automatic "
+          "arrow routing. Existing intramolecular geometry and stereochemistry "
+          "are retained. Returns a list of lists of original-atom pixel positions. "
+          "No mechanism prediction, product generation, or crossing-free "
+          "guarantee is provided.")
       .def("DrawReaction", RDKit::drawReactionHelper,
            (python::arg("self"), python::arg("rxn"),
             python::arg("highlightByReactant") = false,

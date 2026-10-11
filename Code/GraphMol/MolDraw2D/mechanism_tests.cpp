@@ -5,6 +5,7 @@
 
 #include <catch2/catch_all.hpp>
 #include <GraphMol/MolDraw2D/MolDraw2DSVG.h>
+#include <GraphMol/MolPickler.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <RDGeneral/Exceptions.h>
 
@@ -48,6 +49,7 @@ class RecordingSVG : public MolDraw2DSVG {
   std::vector<std::vector<Point2D>> heads;
   std::vector<std::pair<Point2D, Point2D>> dots;
   std::vector<double> widths;
+  std::vector<DrawColour> colours;
 
   void drawCubicBezier(const Point2D &start, const Point2D &control1,
                        const Point2D &control2, const Point2D &end,
@@ -55,6 +57,7 @@ class RecordingSVG : public MolDraw2DSVG {
     REQUIRE(rawCoords);
     curves.push_back({start, control1, control2, end});
     widths.push_back(getDrawLineWidth());
+    colours.push_back(colour());
     MolDraw2DSVG::drawCubicBezier(start, control1, control2, end, rawCoords);
   }
   void drawPolygon(const std::vector<Point2D> &points,
@@ -94,6 +97,77 @@ Point2D evaluate(const std::array<Point2D, 4> &curve, double t) {
   const double u = 1 - t;
   return curve[0] * (u * u * u) + curve[1] * (3 * u * u * t) +
          curve[2] * (3 * u * t * t) + curve[3] * (t * t * t);
+}
+
+std::unique_ptr<RWMol> undepicted(const std::string &smiles) {
+  SmilesParserParams params;
+  params.removeHs = false;
+  std::unique_ptr<RWMol> mol(SmilesToMol(smiles, params));
+  REQUIRE(mol);
+  REQUIRE(mol->getNumConformers() == 0);
+  return mol;
+}
+
+std::string exactMolecule(const ROMol &mol) {
+  std::string result;
+  MolPickler::pickleMol(mol, result,
+                        PicklerOps::PropertyPickleOptions::AllProps |
+                            PicklerOps::PropertyPickleOptions::CoordsAsDouble);
+  return result;
+}
+
+void sameAnchor(const MechanismAnchor &actual,
+                const MechanismAnchor &expected) {
+  CHECK(actual.type == expected.type);
+  CHECK(actual.fragment == expected.fragment);
+  CHECK(actual.index == expected.index);
+  nearPoint(actual.offset, expected.offset);
+  CHECK(actual.fraction == expected.fraction);
+  CHECK(actual.clipToLabel == expected.clipToLabel);
+  CHECK(actual.autoPosition == expected.autoPosition);
+  CHECK(actual.lonePairAngle == expected.lonePairAngle);
+  CHECK(actual.lonePairSeparation == expected.lonePairSeparation);
+  CHECK(actual.lonePairRadius == expected.lonePairRadius);
+}
+
+void automaticGeometry(const RecordingSVG &drawer, size_t arrowCount,
+                       const std::vector<std::vector<Point2D>> &coords) {
+  REQUIRE(drawer.curves.size() == arrowCount);
+  REQUIRE(drawer.heads.size() == arrowCount);
+  auto contained = [&](const Point2D &point) {
+    CHECK(std::isfinite(point.x));
+    CHECK(std::isfinite(point.y));
+    CHECK(point.x >= -0.1);
+    CHECK(point.y >= -0.1);
+    CHECK(point.x <= drawer.width() + 0.1);
+    CHECK(point.y <= drawer.height() + 0.1);
+  };
+  for (const auto &group : coords) {
+    for (const auto &point : group) {
+      contained(point);
+    }
+  }
+  for (const auto &curve : drawer.curves) {
+    for (const auto &point : curve) {
+      CHECK(std::isfinite(point.x));
+      CHECK(std::isfinite(point.y));
+    }
+    CHECK((curve[1] - curve[0]).length() > 1.e-6);
+    CHECK((curve[3] - curve[2]).length() > 1.e-6);
+    for (int i = 0; i <= 100; ++i) {
+      contained(evaluate(curve, i / 100.0));
+    }
+  }
+  for (const auto &head : drawer.heads) {
+    for (const auto &point : head) {
+      contained(point);
+    }
+  }
+  for (const auto &dot : drawer.dots) {
+    contained(dot.first);
+    contained(dot.second);
+    CHECK((dot.second - dot.first).length() > 0);
+  }
 }
 }  // namespace
 
@@ -312,6 +386,214 @@ TEST_CASE("Cubic fallback preserves strokes and handles straight curves",
   CHECK(svg.find("inf") == std::string::npos);
 }
 
+TEST_CASE("Endpoint-only mechanism factories preserve explicit opt outs",
+          "[mechanism][automatic]") {
+  const auto automaticPair = MechanismAnchor::lonePair(0, 0);
+  CHECK(automaticPair.autoPosition);
+  CHECK_FALSE(MechanismAnchor::lonePair(0, 0, {}).autoPosition);
+  const auto end = MechanismAnchor::atom(1, 0);
+  const MechanismArrow automatic(automaticPair, end);
+  CHECK(automatic.autoRoute);
+  CHECK(automatic.autoColour);
+  CHECK(automatic.head == ElectronArrowHead::Full);
+  const MechanismArrow manual(automaticPair, end, {0, 2}, {2, 2});
+  CHECK_FALSE(manual.autoRoute);
+  CHECK_FALSE(manual.autoColour);
+}
+
+TEST_CASE(
+    "Endpoint-only hydroxide proton flow has a native bowed shaft and dots",
+    "[mechanism][automatic]") {
+  auto donor = undepicted("[OH-]");
+  auto proton = undepicted("[H+]");
+  REQUIRE(proton->getNumAtoms() == 1);
+  const auto donorBefore = exactMolecule(*donor);
+  const auto protonBefore = exactMolecule(*proton);
+  MechanismArrow arrow(MechanismAnchor::lonePair(0, 0),
+                       MechanismAnchor::atom(1, 0));
+  const auto original = arrow;
+  RecordingSVG drawer(500, 300);
+  drawer.drawOptions().fixedFontSize = 20;
+  const auto coords =
+      drawer.drawMechanism({donor.get(), proton.get()}, {arrow});
+  REQUIRE(coords.size() == 2);
+  REQUIRE(coords[0].size() == 1);
+  REQUIRE(coords[1].size() == 1);
+  automaticGeometry(drawer, 1, coords);
+  REQUIRE(drawer.dots.size() == 2);
+  CHECK((coords[0][0] - coords[1][0]).length() > 30);
+  const auto &curve = drawer.curves[0];
+  const auto dotCenter = (drawer.dots[0].first + drawer.dots[0].second +
+                          drawer.dots[1].first + drawer.dots[1].second) /
+                         4;
+  nearPoint(curve[0], dotCenter);
+  CHECK((dotCenter - coords[0][0]).length() > 5);
+  CHECK((dotCenter - coords[0][0]).length() <
+        (coords[1][0] - coords[0][0]).length() / 2);
+  CHECK((curve[3] - coords[1][0]).length() > 1);
+  const auto chord = curve[3] - curve[0];
+  const auto midpoint = evaluate(curve, 0.5) - curve[0];
+  CHECK(std::abs(chord.x * midpoint.y - chord.y * midpoint.x) / chord.length() >
+        1);
+  double previous = 0;
+  for (int i = 0; i <= 100; ++i) {
+    const auto point = evaluate(curve, i / 100.0) - curve[0];
+    const auto projection =
+        (point.x * chord.x + point.y * chord.y) / chord.lengthSq();
+    CHECK(projection >= previous - 1.e-8);
+    CHECK(projection >= -1.e-8);
+    CHECK(projection <= 1 + 1.e-8);
+    previous = projection;
+  }
+  nearPoint(arrow.control1, original.control1);
+  nearPoint(arrow.control2, original.control2);
+  sameAnchor(arrow.start, original.start);
+  sameAnchor(arrow.end, original.end);
+  CHECK(exactMolecule(*donor) == donorBefore);
+  CHECK(exactMolecule(*proton) == protonBefore);
+  CHECK(donor->getNumConformers() == 0);
+  CHECK(proton->getNumConformers() == 0);
+}
+
+TEST_CASE("Automatic carbonyl routes are deterministic immutable and coloured",
+          "[mechanism][automatic]") {
+  auto carbonyl = undepicted("CC=O");
+  auto donor = undepicted("[OH-]");
+  std::vector<MechanismArrow> arrows{
+      {MechanismAnchor::lonePair(1, 0), MechanismAnchor::atom(0, 1)},
+      {MechanismAnchor::bond(0, 1), MechanismAnchor::atom(0, 2),
+       ElectronArrowHead::FishhookLeft}};
+  RecordingSVG first(600, 360);
+  const auto coords =
+      first.drawMechanism({carbonyl.get(), donor.get()}, arrows);
+  automaticGeometry(first, 2, coords);
+  REQUIRE(first.colours.size() == 2);
+  CHECK_FALSE(first.colours[0] == first.colours[1]);
+  REQUIRE(first.heads[0].size() == 3);
+  REQUIRE(first.heads[1].size() == 2);
+  for (size_t i = 0; i < arrows.size(); ++i) {
+    auto tangent = first.curves[i][3] - first.curves[i][2];
+    tangent.normalize();
+    const auto wing = first.heads[i][0] - first.curves[i][3];
+    CHECK(wing.x * tangent.x + wing.y * tangent.y < 0);
+    CHECK(wing.x * tangent.y - wing.y * tangent.x > 0);
+    nearPoint(first.heads[i][1], first.curves[i][3]);
+  }
+  first.finishDrawing();
+  arrows[0].control1 = {100, -200};
+  arrows[0].control2 = {-300, 400};
+  const auto original = arrows;
+  RecordingSVG repeated(600, 360);
+  repeated.drawMechanism({carbonyl.get(), donor.get()}, arrows);
+  repeated.finishDrawing();
+  CHECK(repeated.getDrawingText() == first.getDrawingText());
+  for (size_t i = 0; i < arrows.size(); ++i) {
+    nearPoint(arrows[i].control1, original[i].control1);
+    nearPoint(arrows[i].control2, original[i].control2);
+    sameAnchor(arrows[i].start, original[i].start);
+    sameAnchor(arrows[i].end, original[i].end);
+    CHECK(arrows[i].autoRoute);
+    CHECK(arrows[i].autoColour);
+  }
+  arrows[0].colour = {0.25, 0.5, 0.75, 0.5};
+  arrows[0].autoColour = false;
+  RecordingSVG custom(600, 360);
+  custom.drawMechanism({carbonyl.get(), donor.get()}, arrows);
+  REQUIRE(custom.colours.size() == 2);
+  CHECK(custom.colours[0] == arrows[0].colour);
+  CHECK(custom.colours[1] == first.colours[1]);
+}
+
+TEST_CASE("Automatic placement is rigid and respects suppression gates",
+          "[mechanism][automatic]") {
+  auto first = fragment("CCO", {{0, 0}, {1.5, 0}, {1.5, 2}});
+  auto second = fragment("CC", {{5, 1}, {7, 1}});
+  first->setProp("mechanism_test", std::string("retained"));
+  first->getAtomWithIdx(2)->setAtomMapNum(17);
+  const auto before = exactMolecule(*first);
+  const std::vector<ROMol *> mols{first.get(), second.get()};
+  const MechanismArrow automatic(MechanismAnchor::atom(0, 1),
+                                 MechanismAnchor::atom(1, 0));
+  RecordingSVG arranged(600, 360);
+  const auto placed = arranged.drawMechanism(mols, {automatic});
+  automaticGeometry(arranged, 1, placed);
+  const auto scale = (placed[0][1] - placed[0][0]).length() / 1.5;
+  for (size_t f = 0; f < mols.size(); ++f) {
+    const auto &conf = mols[f]->getConformer();
+    for (unsigned int i = 0; i < mols[f]->getNumAtoms(); ++i) {
+      for (unsigned int j = i + 1; j < mols[f]->getNumAtoms(); ++j) {
+        CHECK(
+            (placed[f][i] - placed[f][j]).length() ==
+            Approx((conf.getAtomPos(i) - conf.getAtomPos(j)).length() * scale));
+      }
+    }
+  }
+  CHECK(exactMolecule(*first) == before);
+
+  for (unsigned int scenario = 0; scenario < 6; ++scenario) {
+    CAPTURE(scenario);
+    std::vector<MechanismArrow> arrows{automatic};
+    std::vector<Point2D> offsets;
+    std::vector<double> rotations;
+    bool autoLayout = true;
+    switch (scenario) {
+      case 0:
+        autoLayout = false;
+        break;
+      case 1:
+        offsets = {{0, 0}, {0, 0}};
+        break;
+      case 2:
+        rotations = {0, 0};
+        break;
+      case 3:
+        arrows.emplace_back(MechanismAnchor::atom(0, 0),
+                            MechanismAnchor::atom(1, 1), Point2D{0, 3},
+                            Point2D{7, 3});
+        break;
+      case 4:
+        arrows.emplace_back(MechanismAnchor::point({-2, 2}),
+                            MechanismAnchor::atom(0, 0));
+        break;
+      case 5:
+        arrows.clear();
+        break;
+    }
+    RecordingSVG drawer(600, 360);
+    const auto coords =
+        drawer.drawMechanism(mols, arrows, offsets, rotations, {}, autoLayout);
+    automaticGeometry(drawer, arrows.size(), coords);
+    const auto pinnedScale = (coords[0][1] - coords[0][0]).length() / 1.5;
+    for (size_t f = 0; f < mols.size(); ++f) {
+      for (unsigned int i = 0; i < mols[f]->getNumAtoms(); ++i) {
+        const auto &p = mols[f]->getConformer().getAtomPos(i);
+        nearPoint(coords[f][i],
+                  coords[0][0] + Point2D{p.x, -p.y} * pinnedScale);
+      }
+    }
+  }
+}
+
+TEST_CASE("Automatic anchor validation precedes rendering",
+          "[mechanism][automatic]") {
+  auto mol = undepicted("CC=O");
+  auto pair = MechanismAnchor::lonePair(0, 2);
+  pair.lonePairSeparation = 2 * pair.lonePairRadius;
+  for (const auto &anchor :
+       {MechanismAnchor::atom(1, 0), MechanismAnchor::atom(0, 3),
+        MechanismAnchor::bond(0, 2), MechanismAnchor::lonePair(0, 3), pair}) {
+    RecordingSVG drawer(400, 300);
+    const auto before = drawer.getDrawingText();
+    CHECK_THROWS_AS(drawer.drawMechanism(
+                        {mol.get()}, {{anchor, MechanismAnchor::atom(0, 0)}}),
+                    ValueErrorException);
+    CHECK(drawer.curves.empty());
+    CHECK(drawer.heads.empty());
+    CHECK(drawer.dots.empty());
+    CHECK(drawer.getDrawingText() == before);
+  }
+}
+
 #ifdef RDK_BUILD_CAIRO_SUPPORT
 TEST_CASE("Mechanism SVG and Cairo share geometry", "[mechanism]") {
   auto mol = fragment("CC", {{0, 0}, {1.5, 0}});
@@ -327,5 +609,29 @@ TEST_CASE("Mechanism SVG and Cairo share geometry", "[mechanism]") {
   const auto png = cairo.getDrawingText();
   REQUIRE(png.size() > 8);
   CHECK(png.substr(0, 8) == std::string("\x89PNG\r\n\x1a\n", 8));
+}
+
+TEST_CASE("Endpoint-only SVG and Cairo share native geometry",
+          "[mechanism][automatic]") {
+  auto first = undepicted("CCC");
+  auto second = undepicted("CC");
+  const MechanismArrow arrow(MechanismAnchor::bond(0, 0),
+                             MechanismAnchor::atom(1, 0));
+  RecordingSVG svg(500, 300);
+  MolDraw2DCairo cairo(500, 300, -1, -1, true);
+  const auto svgCoords =
+      svg.drawMechanism({first.get(), second.get()}, {arrow});
+  const auto cairoCoords =
+      cairo.drawMechanism({first.get(), second.get()}, {arrow});
+  REQUIRE(cairoCoords.size() == svgCoords.size());
+  for (size_t f = 0; f < svgCoords.size(); ++f) {
+    REQUIRE(cairoCoords[f].size() == svgCoords[f].size());
+    for (size_t i = 0; i < svgCoords[f].size(); ++i) {
+      nearPoint(cairoCoords[f][i], svgCoords[f][i]);
+    }
+  }
+  cairo.finishDrawing();
+  CHECK(cairo.getDrawingText().substr(0, 8) ==
+        std::string("\x89PNG\r\n\x1a\n", 8));
 }
 #endif

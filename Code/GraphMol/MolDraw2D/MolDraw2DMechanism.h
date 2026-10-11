@@ -38,6 +38,8 @@ struct RDKIT_MOLDRAW2D_EXPORT MechanismAnchor {
   //! point. Nonzero offsets are explicit manual placements and are never
   //! trimmed.
   bool clipToLabel = true;
+  //! Choose the dot position and axis when this is a lone-pair anchor.
+  bool autoPosition = false;
   //! Lone-pair dot-axis angle in degrees, counterclockwise in the fragment
   //! frame.
   double lonePairAngle = 0.0;
@@ -46,6 +48,9 @@ struct RDKIT_MOLDRAW2D_EXPORT MechanismAnchor {
 
   static MechanismAnchor atom(unsigned int fragment, unsigned int atomIndex,
                               const RDGeom::Point2D &offset = {});
+  //! Automatic, zero-offset double/triple-bond arrow tails attach to the
+  //! outermost rendered stroke on the departure side. Explicit offsets and
+  //! manually routed arrows retain their supplied positions.
   static MechanismAnchor bond(unsigned int fragment, unsigned int bondIndex,
                               double fraction = 0.5,
                               const RDGeom::Point2D &offset = {});
@@ -53,6 +58,9 @@ struct RDKIT_MOLDRAW2D_EXPORT MechanismAnchor {
   static MechanismAnchor lonePair(unsigned int fragment, unsigned int atomIndex,
                                   const RDGeom::Point2D &offset,
                                   double angle = 0.0);
+  //! Automatically place a lone pair on a suitable side of the atom label.
+  static MechanismAnchor lonePair(unsigned int fragment,
+                                  unsigned int atomIndex);
   static MechanismAnchor point(const RDGeom::Point2D &position);
 };
 
@@ -71,6 +79,15 @@ struct RDKIT_MOLDRAW2D_EXPORT MechanismArrow {
   double headWidth = 0.06;
   double lineWidth = 0.02;
   DrawColour colour{0.0, 0.0, 0.0, 1.0};
+  //! Choose control points from the endpoints; control1/control2 are ignored.
+  bool autoRoute = false;
+  //! Use the scene's deterministic arrow palette instead of colour.
+  bool autoColour = false;
+
+  //! Endpoint-only arrow with automatic routing and a distinct scene colour.
+  MechanismArrow(const MechanismAnchor &start, const MechanismAnchor &end,
+                 ElectronArrowHead head = ElectronArrowHead::Full)
+      : start(start), end(end), head(head), autoRoute(true), autoColour(true) {}
 
   MechanismArrow(const MechanismAnchor &start, const MechanismAnchor &end,
                  const RDGeom::Point2D &control1,

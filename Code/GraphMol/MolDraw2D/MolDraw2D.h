@@ -206,11 +206,16 @@ class RDKIT_MOLDRAW2D_EXPORT MolDraw2D {
     indices into mols; atom and bond indices refer to those original molecules.
     Coordinates are generated for fragments without a conformer. Each fragment
     is rotated counterclockwise about its coordinate origin, then translated by
-    offsets. Empty offsets/rotations/confIds use zero/zero/default conformer.
+    offsets. Empty confIds uses the default conformer.
     All dimensions and control points are in molecular/scene units, with Y up.
-    Atom anchors can be clipped to labels; other placement and curve routing
-    are explicitly controlled by the caller. No mechanism prediction, product
-    generation, or automatic collision avoidance is performed.
+    Endpoint-only arrows choose their own curves and colours. With autoLayout,
+    fragments are also arranged when every arrow is automatic, neither offsets
+    nor rotations are supplied, and there are no absolute Point anchors.
+    Otherwise the existing fragment coordinates and explicit placements are
+    preserved. autoLayout=false pins fragment placement, not arrow routing.
+    Manual control points remain absolute scene coordinates.
+    No mechanism prediction, product generation, or crossing-free guarantee is
+    provided. Existing intramolecular geometry and stereochemistry are retained.
     Returns canvas coordinates of the original atoms, grouped by fragment.
   */
   std::vector<std::vector<Point2D>> drawMechanism(
@@ -218,7 +223,7 @@ class RDKIT_MOLDRAW2D_EXPORT MolDraw2D {
       const std::vector<MechanismArrow> &arrows,
       const std::vector<Point2D> &offsets = {},
       const std::vector<double> &rotations = {},
-      const std::vector<int> &confIds = {});
+      const std::vector<int> &confIds = {}, bool autoLayout = true);
 
   //! returns the size of the box for the molecule with current drawing settings
   std::pair<int, int> getMolSize(

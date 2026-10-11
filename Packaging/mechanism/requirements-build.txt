@@ -1,0 +1,5 @@
+setuptools>=77
+wheel>=0.45
+packaging>=24
+delvewheel>=1.10; sys_platform == "win32"
+auditwheel>=6; sys_platform == "linux"

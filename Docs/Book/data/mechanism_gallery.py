@@ -45,7 +45,7 @@ def build_scenes():
   return [*concerted_scenes(), *carbonyl_scenes(), radical_scene()]
 
 
-def gallery_html(entries):
+def gallery_html(entries, *, automatic=False):
   cards = []
   for entry in entries:
     title = html.escape(entry["title"])
@@ -60,10 +60,22 @@ def gallery_html(entries):
       f'alt="{title}: {description}"><p>{description}</p>'
       f'<p class="details">{entry["arrows"]} electron-flow arrows; '
       f'{entry["fragments"]} explicitly supplied fragments. {links}</p></article>')
+  title = "Automatic RDKit mechanism gallery" if automatic else "Native RDKit mechanism gallery"
+  explanation = (
+    "Structures and electron-flow endpoints are supplied explicitly. "
+    "Endpoint-only arrows use automatically chosen fragment placements, attachment "
+    "points, curves, and distinct colors. This is deterministic heuristic layout, "
+    "not reaction prediction or a guarantee of crossing-free routing. "
+    "Captions distinguish chemical examples from geometry stress tests."
+    if automatic else
+    "Every structure, electron-flow endpoint, and curve is explicitly authored. "
+    "These examples exercise manual layout, not automatic routing or product "
+    "generation. The carbonyl panels illustrate consecutive steps; the resonance "
+    "panel illustrates electron bookkeeping, not a chemical reaction.")
   return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Native RDKit mechanism gallery</title>
+<title>""" + title + """</title>
 <style>
 body { margin: 0 auto; padding: 2rem; max-width: 100rem; font: 17px/1.5 system-ui, sans-serif;
        color: #18202c; background: #f4f6f8; }
@@ -76,13 +88,10 @@ img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
 .details { font-size: .85rem; color: #48576b; }
 a { color: #153e8c; } code { font-size: .95em; }
 </style></head><body><header>
-<h1>Native RDKit mechanism gallery</h1>
+<h1>""" + title + """</h1>
 <p>Molecules, lone pairs, curves, and arrowheads are rendered together by
 <code>DrawMechanism</code>. These are native SVG drawings, not SVG overlays.</p>
-<p>Every structure, electron-flow endpoint, and curve is explicitly authored.
-The API does not predict mechanisms, generate products, or route around obstacles.
-The carbonyl panels illustrate consecutive steps; the resonance panel illustrates
-electron bookkeeping, not a chemical reaction.</p>
+<p>""" + explanation + """</p>
 </header><main>""" + "\n".join(cards) + "</main></body></html>\n"
 
 
@@ -115,7 +124,8 @@ def generate_gallery(scenes, output, *, png=False):
     })
   manifest = {"schemaVersion": 1, "renderer": "RDKit DrawMechanism", "scenes": entries}
   artifacts["manifest.json"] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
-  artifacts["index.html"] = gallery_html(entries).encode("utf-8")
+  automatic = any(arrow.autoRoute for scene in scenes for arrow in scene.arrows)
+  artifacts["index.html"] = gallery_html(entries, automatic=automatic).encode("utf-8")
   output = Path(output)
   output.mkdir(parents=True, exist_ok=True)
   for name, data in artifacts.items():

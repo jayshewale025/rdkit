@@ -417,7 +417,8 @@ std::vector<T> mechanismVector(const nb::tuple &items, const char *name) {
 
 nb::list drawMechanismHelper(MolDraw2D &self, nb::object pmols,
                              nb::object parrows, nb::object poffsets,
-                             nb::object protations, nb::object pconfIds) {
+                             nb::object protations, nb::object pconfIds,
+                             bool autoLayout) {
   // Keep strong references even for sequences which construct items on access.
   const auto molObjects = mechanismSequence(pmols, "mols");
   for (auto mol : molObjects) {
@@ -436,7 +437,7 @@ nb::list drawMechanismHelper(MolDraw2D &self, nb::object pmols,
       mechanismSequence(pconfIds, "confIds", true), "confIds");
   nb::list result;
   for (const auto &fragment :
-       self.drawMechanism(mols, arrows, offsets, rotations, confIds)) {
+       self.drawMechanism(mols, arrows, offsets, rotations, confIds, autoLayout)) {
     nb::list positions;
     for (const auto &point : fragment) {
       positions.append(nb::cast(point, nb::rv_policy::copy));
@@ -511,9 +512,17 @@ MechanismAnchor mechanismBondAnchor(long long fragment, long long bondIndex,
                                offset);
 }
 MechanismAnchor mechanismLonePairAnchor(long long fragment, long long atomIndex,
-                                        const Point2D &offset, double angle) {
-  return MechanismAnchor::lonePair(checkedMechanismIndex(fragment),
-                                   checkedMechanismIndex(atomIndex), offset,
+                                        nb::object offset, double angle) {
+  const auto checkedFragment = checkedMechanismIndex(fragment);
+  const auto checkedAtomIndex = checkedMechanismIndex(atomIndex);
+  if (offset.is_none()) {
+    return MechanismAnchor::lonePair(checkedFragment, checkedAtomIndex);
+  }
+  Point2D point;
+  if (!nb::try_cast(offset, point, false)) {
+    throw nb::type_error("offset must be a Point2D or None");
+  }
+  return MechanismAnchor::lonePair(checkedFragment, checkedAtomIndex, point,
                                    angle);
 }
 nb::tuple getMechanismColour(const MechanismArrow &self) {
@@ -523,12 +532,18 @@ void setMechanismColour(MechanismArrow &self, nb::tuple tpl) {
   if (nb::len(tpl) != 3 && nb::len(tpl) != 4) {
     throw ValueErrorException("colour must be an RGB or RGBA tuple");
   }
-  auto colour = pyTupleToDrawColour(tpl);
+  DrawColour colour;
+  try {
+    colour = pyTupleToDrawColour(tpl);
+  } catch (const nb::cast_error &) {
+    throw nb::type_error("colour values must be numeric");
+  }
   if (!std::isfinite(colour.r) || !std::isfinite(colour.g) ||
       !std::isfinite(colour.b) || !std::isfinite(colour.a)) {
     throw ValueErrorException("colour values must be finite");
   }
   self.colour = colour;
+  self.autoColour = false;
 }
 
 nb::tuple getBgColour(const RDKit::MolDrawOptions &self) {
@@ -860,7 +875,7 @@ NB_MODULE(rdMolDraw2D, m) {
       .value("FishhookLeft", RDKit::ElectronArrowHead::FishhookLeft)
       .value("FishhookRight", RDKit::ElectronArrowHead::FishhookRight);
   nb::class_<RDKit::MechanismAnchor>(
-      m, "MechanismAnchor", "An explicitly positioned electron-flow endpoint.")
+      m, "MechanismAnchor", "A user-specified electron-flow endpoint.")
       .def(nb::init<>())
       .def_rw("type", &RDKit::MechanismAnchor::type)
       .def_prop_rw(
@@ -872,6 +887,10 @@ NB_MODULE(rdMolDraw2D, m) {
       .def_rw("offset", &RDKit::MechanismAnchor::offset)
       .def_rw("fraction", &RDKit::MechanismAnchor::fraction)
       .def_rw("clipToLabel", &RDKit::MechanismAnchor::clipToLabel)
+      .def_rw(
+          "autoPosition", &RDKit::MechanismAnchor::autoPosition,
+          "Automatically position and orient lone-pair dots, ignoring offset "
+          "and lonePairAngle. False except for LonePair without an offset.")
       .def_rw("lonePairAngle", &RDKit::MechanismAnchor::lonePairAngle)
       .def_rw("lonePairSeparation", &RDKit::MechanismAnchor::lonePairSeparation)
       .def_rw("lonePairRadius", &RDKit::MechanismAnchor::lonePairRadius)
@@ -884,29 +903,49 @@ NB_MODULE(rdMolDraw2D, m) {
                   "Anchor along an original bond, from begin (0) to end (1).")
       .def_static(
           "LonePair", &mechanismLonePairAnchor, "fragment"_a, "atomIndex"_a,
-          "offset"_a, "angle"_a = 0.0,
-          "Draw explicit dots at an atom-relative offset; angle is local degrees.")
+          "offset"_a = nb::none(), "angle"_a = 0.0,
+          "Anchor to an original atom and draw lone-pair dots. With offset=None "
+          "(the default), autoPosition is True and position and angle are chosen "
+          "automatically. An explicit Point2D offset uses manual positioning "
+          "(autoPosition=False); angle is in fragment-local degrees.")
       .def_static(
           "Point", &RDKit::MechanismAnchor::point, "position"_a,
           "Anchor to an absolute scene point, independent of any fragment.");
   nb::class_<RDKit::MechanismArrow>(
-      m, "MechanismArrow", "A user-specified cubic electron-flow arrow.")
+      m, "MechanismArrow",
+      "A user-specified electron-flow arrow with automatic or manual curves.")
+      .def(nb::init<const RDKit::MechanismAnchor &,
+                    const RDKit::MechanismAnchor &, RDKit::ElectronArrowHead>(),
+           "start"_a, "end"_a, "head"_a = RDKit::ElectronArrowHead::Full,
+           "Create an endpoint-only arrow with autoRoute=True and autoColour=True.")
       .def(nb::init<const RDKit::MechanismAnchor &,
                     const RDKit::MechanismAnchor &, const Point2D &,
                     const Point2D &, RDKit::ElectronArrowHead>(),
            "start"_a, "end"_a, "control1"_a, "control2"_a,
-           "head"_a = RDKit::ElectronArrowHead::Full)
+           "head"_a = RDKit::ElectronArrowHead::Full,
+           "Create a manual cubic arrow with autoRoute=False and autoColour=False.")
       .def_rw("start", &RDKit::MechanismArrow::start)
       .def_rw("end", &RDKit::MechanismArrow::end)
-      .def_rw("control1", &RDKit::MechanismArrow::control1)
-      .def_rw("control2", &RDKit::MechanismArrow::control2)
+      .def_rw("control1", &RDKit::MechanismArrow::control1,
+              "First scene-space control point; ignored when autoRoute "
+              "is True. Assignment does not disable autoRoute.")
+      .def_rw("control2", &RDKit::MechanismArrow::control2,
+              "Second scene-space control point; ignored when autoRoute "
+              "is True. Assignment does not disable autoRoute.")
       .def_rw("head", &RDKit::MechanismArrow::head)
       .def_rw("headLength", &RDKit::MechanismArrow::headLength)
       .def_rw("headWidth", &RDKit::MechanismArrow::headWidth)
       .def_rw("lineWidth", &RDKit::MechanismArrow::lineWidth)
+      .def_rw("autoRoute", &RDKit::MechanismArrow::autoRoute,
+              "Choose control points automatically. True for endpoint-only "
+              "arrows, False for manual arrows.")
+      .def_rw("autoColour", &RDKit::MechanismArrow::autoColour,
+              "Use the deterministic scene palette instead of colour. "
+              "True for endpoint-only arrows, False for manual arrows.")
       .def_prop_rw(
           "colour", &getMechanismColour, &setMechanismColour,
-          "Arrow colour as an RGBA tuple; accepts RGB or RGBA in [0, 1].");
+          "Arrow colour as an RGBA tuple; accepts RGB or RGBA in [0, 1]. "
+          "Successful assignment sets autoColour=False.");
 
   nb::enum_<RDKit::MultiColourHighlightStyle>(m, "MultiColourHighlightStyle")
       .value("CircleAndLine", RDKit::MultiColourHighlightStyle::CIRCLEANDLINE)
@@ -1290,13 +1329,21 @@ DrawElement items.  Default=DrawElement.ALL)DOC")
       .def(
           "DrawMechanism", &drawMechanismHelper, "mols"_a.none(), "arrows"_a.none(),
           "offsets"_a = nb::none(), "rotations"_a = nb::none(),
-          "confIds"_a = nb::none(),
-          "Draw copies of positioned fragments and user-specified electron arrows. "
+          "confIds"_a = nb::none(), "autoLayout"_a = true,
+          "Draw copies of fragments and user-specified electron arrows. "
           "Inputs are sequences; optional placement sequences may be None. "
           "Rotations are counterclockwise degrees, applied before offsets. "
-          "Anchor indices refer to original molecules; control points use scene "
-          "coordinates (Y up). Returns a list of lists of original-atom pixel "
-          "positions. No mechanism inference or automatic routing is performed.")
+          "Anchor indices refer to original molecules; manual control points use "
+          "scene coordinates (Y up). Endpoint-only arrows choose their curves "
+          "and colours. With autoLayout=True (the default), fragments are also "
+          "arranged when arrows is nonempty, every arrow has autoRoute=True, "
+          "offsets and rotations are absent or empty, and there are no Point "
+          "anchors. Otherwise existing coordinates and explicit placements are "
+          "preserved. autoLayout=False pins fragment placement, not automatic "
+          "arrow routing. Existing intramolecular geometry and stereochemistry "
+          "are retained. Returns a list of lists of original-atom pixel positions. "
+          "No mechanism prediction, product generation, or crossing-free "
+          "guarantee is provided.")
       .def("DrawReaction", &drawReactionHelper, "rxn"_a,
            "highlightByReactant"_a = false,
            "highlightColorsReactants"_a = nb::none(), "confIds"_a = nb::none(),
