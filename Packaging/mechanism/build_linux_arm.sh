@@ -20,8 +20,11 @@ tar -xf boost_1_88_0.tar.bz2
 cd boost_1_88_0
 ./bootstrap.sh --with-python="$python" --with-libraries=python \
   --prefix="$build/boost"
-./b2 -j2 variant=release link=shared threading=multi \
-  cxxflags=-fPIC --with-python install
+if ! ./b2 -j2 variant=release link=shared threading=multi \
+  cxxflags=-fPIC --with-python install > "$build/boost-build.log" 2>&1; then
+  tail -n 120 "$build/boost-build.log"
+  exit 1
+fi
 cp LICENSE_1_0.txt "$build/licenses/Boost-LICENSE_1_0.txt"
 cp -a /usr/share/licenses "$build/licenses/system"
 rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\t%{LICENSE}\t%{SOURCERPM}\n' \

@@ -443,7 +443,7 @@ if(RDK_BUILD_BOOST_PYTHON_WRAPPERS)
 
   #-------
   # pull in python:
-  find_package(Python COMPONENTS Interpreter Development.Module Development.Embed NumPy)
+  find_package(Python COMPONENTS Interpreter Development.Module NumPy REQUIRED)
   target_include_directories(rdkit_py_base INTERFACE ${Python_INCLUDE_DIRS})
   target_include_directories(rdkit_py_base INTERFACE ${Python_NumPy_INCLUDE_DIRS})
   target_compile_definitions(rdkit_py_base INTERFACE "-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION")
@@ -457,6 +457,8 @@ if(RDK_BUILD_BOOST_PYTHON_WRAPPERS)
   )
 
   if(WIN32 OR "${Py_ENABLE_SHARED}" STREQUAL "1")
+    # manylinux's static Python provides module headers but no embedding library.
+    find_package(Python COMPONENTS Development.Embed REQUIRED)
     target_link_libraries(rdkit_py_base INTERFACE ${Python_LIBRARIES} )
   endif()
 
