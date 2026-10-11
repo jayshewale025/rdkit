@@ -7,7 +7,12 @@ build="$root/build-mechanism-arm"
 python=/opt/python/cp313-cp313/bin/python
 export PATH="/opt/python/cp313-cp313/bin:$PATH"
 
-dnf install -y cairo-devel freetype-devel bzip2-devel
+# Fail before compilation if provenance cannot be read from the checkout.
+git -C "$root" rev-parse --verify HEAD
+git -C "$root" status --porcelain
+dnf install -y cairo-devel freetype-devel bzip2-devel ccache
+export CCACHE_DIR="$build/ccache"
+ccache --max-size=2G
 "$python" -m pip install -r "$root/Packaging/mechanism/requirements-build.txt" \
   cmake ninja 'numpy>=2,<3' Pillow pytest
 mkdir -p "$build/dependencies" "$build/licenses"
@@ -37,6 +42,8 @@ printf '%s\n' \
 
 cmake -S "$root" -B "$build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
   -DCMAKE_PREFIX_PATH="$build/boost" \
   -DPython_EXECUTABLE="$python" \
   -DRDK_BUILD_CPP_TESTS=OFF \
