@@ -28,7 +28,7 @@ uses a deterministic arrow-colour palette. Molecules, lone pairs, and arrows
 are rendered together in SVG or, with Cairo support, PNG—not as SVG overlays.
 
 **Installing stock RDKit with pip or conda does not provide this API.**
-Use this fork's wheel or build its `feature/mechanism-drawing` branch.
+Use this fork's wheel or build its `master` branch.
 The [wheel installation and quickstart guide](Packaging/mechanism/README.md)
 covers Windows x64 / Python 3.12, ARM64 Linux / Python 3.13 CI artifacts,
 isolated environments, PNG/SVG output, and the one-page textbook example.

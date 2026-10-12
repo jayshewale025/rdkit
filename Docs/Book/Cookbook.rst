@@ -647,9 +647,9 @@ generate missing coordinates, choose rigid fragment placements and curves
 heuristically, and apply a deterministic arrow-colour palette. No SVG
 post-processing is needed.
 
-This API is provided by the source fork's ``feature/mechanism-drawing`` branch,
+This API is provided by the source fork's ``master`` branch,
 **not stock pip or conda RDKit**. Install a matching fork wheel using the
-`mechanism quickstart <https://github.com/jayshewale025/rdkit/blob/feature/mechanism-drawing/Packaging/mechanism/README.md>`_,
+`mechanism quickstart <https://github.com/jayshewale025/rdkit/blob/master/Packaging/mechanism/README.md>`_,
 or build this checkout following the existing
 `RDKit installation instructions <Install.html>`_. Source builds support
 Boost.Python and nanobind; the packaged wheels use Boost.Python and include

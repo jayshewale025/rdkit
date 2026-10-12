@@ -51,10 +51,10 @@ are needed for an installed wheel.
 
 ## Raspberry Pi OS: install and draw
 
-In the fork's **Actions** tab, open **Mechanism ARM64 wheel**. Packaging/example
-changes pushed to `feature/mechanism-drawing` trigger it automatically.
-A manual dispatch is also declared (GitHub requires the workflow on the default
-branch to expose its Run workflow button). After the job succeeds, download and unzip
+In the fork's **Actions** tab, open **Mechanism ARM64 wheel**. Relevant native
+code, Python, data, packaging, and example changes trigger it for pull requests
+targeting `master` and pushes to `master`. You can also use **Run workflow**
+to build `master` manually. After the job succeeds, download and unzip
 `rdkit-mechanism-cp313-aarch64`. This is a workflow artifact, not a PyPI release.
 
 Run these commands **on the Pi**, in the directory containing the ARM wheel:

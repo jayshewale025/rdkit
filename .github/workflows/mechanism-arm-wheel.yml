@@ -3,9 +3,27 @@ name: Mechanism ARM64 wheel
 on:
   workflow_dispatch:
   push:
-    branches: [feature/mechanism-drawing]
+    branches: [master]
     paths:
       - .github/workflows/mechanism-arm-wheel.yml
+      - CMakeLists.txt
+      - Code/**
+      - External/**
+      - rdkit/**
+      - Data/**
+      - license.txt
+      - Packaging/mechanism/**
+      - Docs/Book/data/mechanism_*.py
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/mechanism-arm-wheel.yml
+      - CMakeLists.txt
+      - Code/**
+      - External/**
+      - rdkit/**
+      - Data/**
+      - license.txt
       - Packaging/mechanism/**
       - Docs/Book/data/mechanism_*.py
 
