@@ -32,6 +32,7 @@
 #include <GraphMol/RDKitBase.h>
 #include <GraphMol/ChemReactions/Reaction.h>
 #include <GraphMol/MolDraw2D/MolDraw2DHelpers.h>
+#include <GraphMol/MolDraw2D/MolDraw2DMechanism.h>
 
 // ****************************************************************************
 using RDGeom::Point2D;
@@ -199,6 +200,31 @@ class RDKIT_MOLDRAW2D_EXPORT MolDraw2D {
       const std::vector<DrawColour> *highlightColorsReactants = nullptr,
       const std::vector<int> *confIds = nullptr);
 
+  //! Draw positioned fragments and a batch of user-specified electron arrows.
+  /*!
+    Input molecules are copied, never modified. Fragment IDs in anchors are
+    indices into mols; atom and bond indices refer to those original molecules.
+    Coordinates are generated for fragments without a conformer. Each fragment
+    is rotated counterclockwise about its coordinate origin, then translated by
+    offsets. Empty confIds uses the default conformer.
+    All dimensions and control points are in molecular/scene units, with Y up.
+    Endpoint-only arrows choose their own curves and colours. With autoLayout,
+    fragments are also arranged when every arrow is automatic, neither offsets
+    nor rotations are supplied, and there are no absolute Point anchors.
+    Otherwise the existing fragment coordinates and explicit placements are
+    preserved. autoLayout=false pins fragment placement, not arrow routing.
+    Manual control points remain absolute scene coordinates.
+    No mechanism prediction, product generation, or crossing-free guarantee is
+    provided. Existing intramolecular geometry and stereochemistry are retained.
+    Returns canvas coordinates of the original atoms, grouped by fragment.
+  */
+  std::vector<std::vector<Point2D>> drawMechanism(
+      const std::vector<ROMol *> &mols,
+      const std::vector<MechanismArrow> &arrows,
+      const std::vector<Point2D> &offsets = {},
+      const std::vector<double> &rotations = {},
+      const std::vector<int> &confIds = {}, bool autoLayout = true);
+
   //! returns the size of the box for the molecule with current drawing settings
   std::pair<int, int> getMolSize(
       const ROMol &mol, const std::string &legend = "",
@@ -271,6 +297,11 @@ class RDKIT_MOLDRAW2D_EXPORT MolDraw2D {
                             const DrawColour &col1, const DrawColour &col2,
                             unsigned int nSegments = 16,
                             double vertOffset = 0.05, bool rawCoords = false);
+  //! Stroke a cubic Bezier curve with the current line style.
+  //! SVG/Cairo use native paths; other backends use adaptive subdivision.
+  virtual void drawCubicBezier(const Point2D &start, const Point2D &control1,
+                               const Point2D &control2, const Point2D &end,
+                               bool rawCoords = false);
   //! Draw an arrow with either lines or a filled head (when asPolygon is true).
   //! Angle is the half-angle at the point, so the default gives total angle
   //! of 60 degrees at the arrow head.

@@ -30,6 +30,7 @@ if (RDK_BUILD_FREETYPE_SUPPORT AND RDK_INSTALL_COMIC_FONTS)
 endif ()
 
 rdkit_headers(MolDraw2D.h
+        MolDraw2DMechanism.h
         MolDraw2DSVG.h
         MolDraw2Dwx.h
         MolDraw2DJS.h
@@ -39,7 +40,7 @@ rdkit_headers(MolDraw2D.h
         DEST GraphMol/MolDraw2D
 )
 
-rdkit_library(MolDraw2D MolDraw2D.cpp MolDraw2DSVG.cpp
+rdkit_library(MolDraw2D MolDraw2D.cpp MolDraw2DSVG.cpp MolDraw2DMechanism.cpp
         MolDraw2DDetails.cpp MolDraw2DUtils.cpp MolDrawOptionsJSONParsers.cpp AtomSymbol.cpp
         DrawAnnotation.cpp DrawMol.cpp DrawMolMCH.cpp DrawMolMCHCircleAndLine.cpp
         DrawMolMCHLasso.cpp
@@ -97,6 +98,9 @@ rdkit_test(moldraw2DTest1 test1.cpp LINK_LIBRARIES
 
 rdkit_catch_test(moldraw2DTestCatch catch_tests.cpp LINK_LIBRARIES
         MolDraw2D CIPLabeler)
+
+rdkit_catch_test(moldraw2DMechanismTest mechanism_tests.cpp LINK_LIBRARIES
+        MolDraw2D)
 
 rdkit_test(moldraw2DRxnTest1 rxn_test1.cpp LINK_LIBRARIES
         MolDraw2D)

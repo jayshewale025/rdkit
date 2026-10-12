@@ -104,7 +104,7 @@ class DrawMol {
   // common bits used by createDrawObjects and setScale.
   void finishCreateDrawObjects();
   void initDrawMolecule(const ROMol &mol);
-  void extractAll(double scale);
+  virtual void extractAll(double scale);
   void extractAtomCoords();
   void extractAtomSymbols();
   void extractBonds();

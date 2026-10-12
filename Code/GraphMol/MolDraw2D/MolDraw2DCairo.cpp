@@ -11,6 +11,8 @@
 //
 
 #include <cairo.h>
+#include <array>
+#include <cmath>
 #include <fstream>
 #include <GraphMol/MolDraw2D/MolDraw2DCairo.h>
 #include <GraphMol/MolDraw2D/DrawTextCairo.h>
@@ -121,6 +123,39 @@ void MolDraw2DCairo::drawLine(const Point2D &cds1, const Point2D &cds2,
   cairo_move_to(dp_cr, c1.x, c1.y);
   cairo_line_to(dp_cr, c2.x, c2.y);
   cairo_stroke(dp_cr);
+}
+
+// ****************************************************************************
+void MolDraw2DCairo::drawCubicBezier(const Point2D &start,
+                                     const Point2D &control1,
+                                     const Point2D &control2,
+                                     const Point2D &end, bool rawCoords) {
+  std::array<Point2D, 4> points{start, control1, control2, end};
+  for (auto &point : points) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+      throw ValueErrorException("Bezier coordinates must be finite");
+    }
+    if (!rawCoords) {
+      point = getDrawCoords(point);
+    }
+    if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+      throw ValueErrorException(
+          "Transformed Bezier coordinates must be finite");
+    }
+  }
+  PRECONDITION(dp_cr, "no draw context");
+  cairo_save(dp_cr);
+  cairo_set_line_width(dp_cr, getDrawLineWidth());
+  cairo_set_line_cap(dp_cr, CAIRO_LINE_CAP_BUTT);
+  cairo_set_line_join(dp_cr, CAIRO_LINE_JOIN_MITER);
+  setDashes(dp_cr, dash());
+  const auto &col = colour();
+  cairo_set_source_rgba(dp_cr, col.r, col.g, col.b, col.a);
+  cairo_move_to(dp_cr, points[0].x, points[0].y);
+  cairo_curve_to(dp_cr, points[1].x, points[1].y, points[2].x, points[2].y,
+                 points[3].x, points[3].y);
+  cairo_stroke(dp_cr);
+  cairo_restore(dp_cr);
 }
 
 // ****************************************************************************

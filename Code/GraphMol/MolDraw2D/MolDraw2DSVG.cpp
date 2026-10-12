@@ -22,6 +22,8 @@
 
 #include <boost/format.hpp>
 #include <boost/algorithm/string.hpp>
+#include <array>
+#include <cmath>
 #include <sstream>
 
 namespace RDKit {
@@ -226,6 +228,41 @@ std::string getDashString(const DashPattern &dashes) {
   return res;
 }
 }  // namespace
+
+// ****************************************************************************
+void MolDraw2DSVG::drawCubicBezier(const Point2D &start,
+                                   const Point2D &control1,
+                                   const Point2D &control2, const Point2D &end,
+                                   bool rawCoords) {
+  std::array<Point2D, 4> points{start, control1, control2, end};
+  for (auto &point : points) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+      throw ValueErrorException("Bezier coordinates must be finite");
+    }
+    if (!rawCoords) {
+      point = getDrawCoords(point);
+    }
+    if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+      throw ValueErrorException(
+          "Transformed Bezier coordinates must be finite");
+    }
+  }
+  const auto col = DrawColourToSVG(colour());
+  d_os << "<path ";
+  outputClasses();
+  d_os << "d='M " << MolDraw2D_detail::formatDouble(points[0].x) << ","
+       << MolDraw2D_detail::formatDouble(points[0].y) << " C "
+       << MolDraw2D_detail::formatDouble(points[1].x) << ","
+       << MolDraw2D_detail::formatDouble(points[1].y) << " "
+       << MolDraw2D_detail::formatDouble(points[2].x) << ","
+       << MolDraw2D_detail::formatDouble(points[2].y) << " "
+       << MolDraw2D_detail::formatDouble(points[3].x) << ","
+       << MolDraw2D_detail::formatDouble(points[3].y) << "' "
+       << "style='fill:none;stroke:" << col
+       << ";stroke-width:" << MolDraw2D_detail::formatDouble(getDrawLineWidth())
+       << "px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       << getDashString(dash()) << "' />\n";
+}
 
 // ****************************************************************************
 void MolDraw2DSVG::drawLine(const Point2D &cds1, const Point2D &cds2,

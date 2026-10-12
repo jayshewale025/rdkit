@@ -1,0 +1,75 @@
+name: Mechanism ARM64 wheel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mechanism-arm-wheel.yml
+      - CMakeLists.txt
+      - Code/**
+      - External/**
+      - rdkit/**
+      - Data/**
+      - license.txt
+      - Packaging/mechanism/**
+      - Docs/Book/data/mechanism_*.py
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/mechanism-arm-wheel.yml
+      - CMakeLists.txt
+      - Code/**
+      - External/**
+      - rdkit/**
+      - Data/**
+      - license.txt
+      - Packaging/mechanism/**
+      - Docs/Book/data/mechanism_*.py
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    container:
+      image: quay.io/pypa/manylinux_2_28_aarch64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Trust this checkout inside the ephemeral build container
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Restore compiler cache
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build-mechanism-arm/ccache
+          key: mechanism-arm64-cp313-v1-${{ hashFiles('CMakeLists.txt', 'Code/**', 'External/**') }}
+          restore-keys: mechanism-arm64-cp313-v1-
+      - name: Build and verify CPython 3.13 ARM64 wheel
+        shell: bash
+        run: bash Packaging/mechanism/build_linux_arm.sh
+      - name: Save compiler cache even if packaging fails
+        if: always() && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build-mechanism-arm/ccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+      - name: Upload installable wheel and quickstart
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdkit-mechanism-cp313-aarch64
+          path: |
+            build-mechanism-arm/wheelhouse/*.whl
+            Packaging/mechanism/README.md
+          if-no-files-found: error
+      - name: Upload rendered smoke-test examples
+        uses: actions/upload-artifact@v4
+        with:
+          name: mechanism-arm-examples
+          path: build-mechanism-arm/installed-examples/
+          if-no-files-found: error
