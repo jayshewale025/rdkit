@@ -1,0 +1,61 @@
+[
+  {
+    "name": "sn1-cleavage",
+    "molecules": ["CC(C)(C)Br"],
+    "arrows": [{"start": {"type": "bond", "fragment": 0, "index": 3}, "end": {"type": "atom", "fragment": 0, "index": 4}}]
+  },
+  {
+    "name": "sn1-water-attack",
+    "molecules": ["C[C+](C)C", "O"],
+    "arrows": [{"start": {"type": "lonePair", "fragment": 1, "index": 0}, "end": {"type": "atom", "fragment": 0, "index": 1}}]
+  },
+  {
+    "name": "sn2",
+    "molecules": ["[OH-]", "CBr"],
+    "arrows": [
+      {"start": {"type": "lonePair", "fragment": 0, "index": 0}, "end": {"type": "atom", "fragment": 1, "index": 0}},
+      {"start": {"type": "bond", "fragment": 1, "index": 0}, "end": {"type": "atom", "fragment": 1, "index": 1}}
+    ]
+  },
+  {
+    "name": "e2-explicit-hydrogen",
+    "molecules": ["[OH-]", "[H]CCBr"],
+    "arrows": [
+      {"start": {"type": "lonePair", "fragment": 0, "index": 0}, "end": {"type": "atom", "fragment": 1, "index": 0}},
+      {"start": {"type": "bond", "fragment": 1, "index": 0}, "end": {"type": "bond", "fragment": 1, "index": 1}},
+      {"start": {"type": "bond", "fragment": 1, "index": 2}, "end": {"type": "atom", "fragment": 1, "index": 3}}
+    ]
+  },
+  {
+    "name": "carbonyl-addition",
+    "molecules": ["[C-]#N", "CC(C)=O"],
+    "arrows": [
+      {"start": {"type": "lonePair", "fragment": 0, "index": 0}, "end": {"type": "atom", "fragment": 1, "index": 1}},
+      {"start": {"type": "bond", "fragment": 1, "index": 2}, "end": {"type": "atom", "fragment": 1, "index": 3}}
+    ]
+  },
+  {
+    "name": "aromatic-attack",
+    "molecules": ["C1=CC=CC=C1", "O=[N+]=O"],
+    "arrows": [{"start": {"type": "bond", "fragment": 0, "index": 0}, "end": {"type": "atom", "fragment": 1, "index": 1}}],
+    "kekulize": true
+  },
+  {
+    "name": "radical-fishhooks",
+    "molecules": ["ClCl"],
+    "arrows": [
+      {"start": {"type": "bond", "fragment": 0, "index": 0}, "end": {"type": "atom", "fragment": 0, "index": 0}, "head": "fishhookLeft"},
+      {"start": {"type": "bond", "fragment": 0, "index": 0}, "end": {"type": "atom", "fragment": 0, "index": 1}, "head": "fishhookRight"}
+    ]
+  },
+  {
+    "name": "manual-curve",
+    "molecules": ["CC=O", "[OH-]"],
+    "arrows": [
+      {"start": {"type": "point", "position": [0, 0]}, "end": {"type": "point", "position": [2, 1]}, "control1": [0, 2], "control2": [2, 2], "colour": [0.1, 0.3, 0.7]}
+    ],
+    "offsets": [[0, 0], [4, 0]],
+    "rotations": [30, 0],
+    "autoLayout": false
+  }
+]

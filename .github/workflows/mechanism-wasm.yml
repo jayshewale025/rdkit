@@ -1,0 +1,70 @@
+name: Mechanism WebAssembly
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/mechanism-wasm.yml
+      - Code/MinimalLib/**
+      - Code/GraphMol/MolDraw2D/**
+      - Code/GraphMol/Depictor/**
+      - CMakeLists.txt
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies (Emscripten, Boost, FreeType, zlib)
+        run: |
+          docker build --target deps-stage -t rdkit-minimallib-deps \
+            --build-arg EMSDK_VERSION=6.0.13 \
+            -f Code/MinimalLib/docker/01_deps.Dockerfile Code/MinimalLib/docker
+      - name: Source from this checkout (never upstream master)
+        run: |
+          docker build --target local-src-stage -t rdkit-minimallib-rdkit-src \
+            -f Code/MinimalLib/docker/02_rdkit_copy.Dockerfile .
+      - name: Build module with FreeType and run existing MinimalLib tests
+        run: |
+          docker build --target build-stage -t rdkit-minimallib \
+            --build-arg VERSION=2026.9.1-mechanism.wasm.1 \
+            -f Code/MinimalLib/docker/03_build.Dockerfile Code/MinimalLib/docker
+          id=$(docker create rdkit-minimallib)
+          mkdir -p Code/MinimalLib/build
+          docker cp "$id:/src/rdkit/Code/MinimalLib/build/." Code/MinimalLib/build/
+          docker rm "$id"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Mechanism tests (including invalid input and repeated draws)
+        run: node Code/MinimalLib/tests/mechanism.js
+      - name: Real browser test
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-test" playwright@1.65.2
+          "$RUNNER_TEMP/browser-test/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/browser-test/node_modules" node Code/MinimalLib/tests/mechanism-browser.js
+      - name: Package the fork without publishing to the upstream npm namespace
+        working-directory: Code/MinimalLib/build
+        run: |
+          npm pkg set name=@jayshewale025/rdkit-mechanism \
+            repository.url=https://github.com/jayshewale025/rdkit.git
+          rm -f package.json.tmp
+          npm pack
+          sha256sum dist/RDKit_minimal.* *.tgz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rdkit-mechanism-wasm
+          path: |
+            Code/MinimalLib/build/
+            Code/MinimalLib/docs/mechanism.md
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mechanism-wasm-examples
+          path: Code/MinimalLib/tests/mechanism-output/
+          if-no-files-found: error
