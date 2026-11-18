@@ -7,6 +7,8 @@ on:
 
 jobs:
   build:
+    # Fork releases must never try to publish into the upstream @rdkit namespace.
+    if: github.repository == 'rdkit/rdkit'
     runs-on: ubuntu-latest
 
     # For npm Trusted Publishing

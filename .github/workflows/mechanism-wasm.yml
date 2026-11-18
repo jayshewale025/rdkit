@@ -53,7 +53,7 @@ jobs:
           node Code/MinimalLib/tests/mechanism-compare.js
       - name: Real browser test
         run: |
-          npm install --prefix "$RUNNER_TEMP/browser-test" playwright@1.65.2
+          npm install --prefix "$RUNNER_TEMP/browser-test" playwright@1.65.1
           "$RUNNER_TEMP/browser-test/node_modules/.bin/playwright" install --with-deps chromium
           NODE_PATH="$RUNNER_TEMP/browser-test/node_modules" node Code/MinimalLib/tests/mechanism-browser.js
       - name: Package the fork without publishing to the upstream npm namespace
@@ -65,6 +65,7 @@ jobs:
           npm pack
           sha256sum dist/RDKit_minimal.* *.tgz > SHA256SUMS
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: rdkit-mechanism-wasm
           path: |
