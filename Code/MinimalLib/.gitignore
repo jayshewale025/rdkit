@@ -4,3 +4,4 @@ build/
 node_modules/
 *.tgz
 package.json
+tests/mechanism-output/

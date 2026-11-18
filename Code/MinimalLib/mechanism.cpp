@@ -213,7 +213,9 @@ std::string get_mechanism_svg(const std::string &spec_json,
     arrows.push_back(arrow);
   }
 
-  const auto details = details_json.empty() ? bj::object{} : object(bj::parse(details_json), "details");
+  const bj::value detailsValue = details_json.empty() ? bj::value(bj::object{})
+                                                     : bj::parse(details_json);
+  const auto &details = object(detailsValue, "details");
   auto dimension = [&](const char *name, int fallback) {
     const auto *value = details.if_contains(name);
     const auto size = value ? index(*value, name) : static_cast<unsigned int>(fallback);

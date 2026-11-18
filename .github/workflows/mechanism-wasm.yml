@@ -43,6 +43,14 @@ jobs:
           node-version: 26
       - name: Mechanism tests (including invalid input and repeated draws)
         run: node Code/MinimalLib/tests/mechanism.js
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Compare with the Python mechanism-v1 baseline
+        run: |
+          python -m pip install 'https://github.com/jayshewale025/rdkit/releases/download/mechanism-v1/rdkit-2026.9.1%2Bmechanism.1-cp313-cp313-manylinux_2_28_x86_64.whl'
+          python Code/MinimalLib/tests/mechanism-reference.py
+          node Code/MinimalLib/tests/mechanism-compare.js
       - name: Real browser test
         run: |
           npm install --prefix "$RUNNER_TEMP/browser-test" playwright@1.65.2
@@ -64,6 +72,7 @@ jobs:
             Code/MinimalLib/docs/mechanism.md
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: mechanism-wasm-examples
           path: Code/MinimalLib/tests/mechanism-output/

@@ -43,6 +43,10 @@ Or use a CDN by adding this script tag to your HTML.
 
 ## Getting Started and Loading the WASM module
 
+This fork also exposes native electron-flow (curly-arrow) drawings in the browser
+through `get_mechanism_svg()`. See [the mechanism API](docs/mechanism.md) for the
+JSON format, examples, build artifacts and Python/browser comparison tests.
+
 See [rdkitjs.com](https://rdkitjs.com) for example code, documentation, and demos.
 
 Usually, a trick is needed to make the `.wasm` file available as a standalone file, but it varies from framework to framework.
