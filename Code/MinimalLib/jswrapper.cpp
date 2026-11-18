@@ -24,6 +24,21 @@
 using namespace RDKit;
 
 namespace {
+// Surface input errors as ordinary catchable JS Errors, not opaque WASM
+// exception handles. All molecule/arrow storage has unwound before throwing.
+std::string mechanism_svg_helper(const std::string &spec,
+                                  const std::string &details) {
+  try {
+    return get_mechanism_svg(spec, details);
+  } catch (const std::exception &error) {
+    emscripten::val::global("Error").new_(std::string(error.what())).throw_();
+  }
+}
+
+std::string mechanism_svg_no_details(const std::string &spec) {
+  return mechanism_svg_helper(spec, "");
+}
+
 const emscripten::val JSMolObj() {
   static const auto JSMOL = emscripten::val::module_property("Mol");
   return JSMOL;
@@ -872,6 +887,8 @@ EMSCRIPTEN_BINDINGS(RDKit_minimal) {
       .function("clear_buffer", &JSLog::clear_buffer);
 
   function("version", &version);
+  function("get_mechanism_svg(spec_json, details_json)", &mechanism_svg_helper);
+  function("get_mechanism_svg(spec_json)", &mechanism_svg_no_details);
   function("prefer_coordgen(prefer)", &prefer_coordgen);
   function("use_legacy_stereo_perception(value)", &use_legacy_stereo_perception);
   function("allow_non_tetrahedral_chirality(value)", &allow_non_tetrahedral_chirality);

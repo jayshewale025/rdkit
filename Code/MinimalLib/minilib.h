@@ -374,6 +374,11 @@ JSMolBase *get_qmol(const std::string &input);
 JSReaction *get_rxn(const std::string &input, const std::string &details_json);
 #endif
 std::string version();
+//! Draw user-specified electron-flow arrows with the native mechanism renderer.
+//! Takes JSON molecules/arrows and optional standard MolDrawOptions as JSON.
+//! Molecules and arrows are owned by this call; no JS objects need deleting.
+std::string get_mechanism_svg(const std::string &spec_json,
+                              const std::string &details_json);
 void prefer_coordgen(bool prefer);
 bool use_legacy_stereo_perception(bool value);
 bool allow_non_tetrahedral_chirality(bool value);

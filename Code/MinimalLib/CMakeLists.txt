@@ -40,7 +40,7 @@ if(RDK_BUILD_MINIMAL_LIB)
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${FREETYPE_LIBRARY}")
         endif()
     endif()
-    add_executable(RDKit_minimal jswrapper.cpp minilib.cpp JSONParsers.cpp)
+    add_executable(RDKit_minimal jswrapper.cpp minilib.cpp JSONParsers.cpp mechanism.cpp)
     target_link_libraries(RDKit_minimal ${MINIMAL_LIB_LIBRARIES})
 
     set_target_properties(RDKit_minimal PROPERTIES LINK_FLAGS "--bind")
